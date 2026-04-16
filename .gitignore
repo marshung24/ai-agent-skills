@@ -1,0 +1,9 @@
+# AI Agent folder
+.claude
+.codex
+.gemini
+.agents
+
+# tmp dir
+tmp*
+todo.md

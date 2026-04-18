@@ -6,7 +6,11 @@
 
 ## Skills
 
-（尚未新增）
+### Tooling
+
+| Skill | 說明 |
+|-------|------|
+| [mh-agent-skills-builder](skills/mh-agent-skills-builder/) | 協助建立、修改和優化 Agent Skills，含設計方法論、多種範本與最佳實踐 |
 
 ## Installation
 

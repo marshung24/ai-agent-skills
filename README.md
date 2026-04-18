@@ -95,6 +95,7 @@ skills/mh-<name>/
 
 ## References
 
+- [Agent Skills 開發目標指南](docs/skills-development-guide.md) — 願景、設計原則、觸發限制、分階段路線圖
 - [Agent Skills Specification](https://agentskills.io/specification)
 - [Claude Docs - Agent Skills](https://platform.claude.com/docs/zh-TW/agents-and-tools/agent-skills/overview)
 

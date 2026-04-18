@@ -6,6 +6,12 @@
 
 ## Skills
 
+### Development
+
+| Skill | 說明 |
+|-------|------|
+| [mh-code-review](skills/mh-code-review/) | 程式碼審查（自我 review / PR review），依風險優先序檢查，支援 GitHub PR 操作 |
+
 ### Tooling
 
 | Skill | 說明 |
@@ -33,13 +39,13 @@
 
 ```bash
 # Claude Code
-cp -r skills/<skill-name> ~/.claude/skills/
+cp -r skills/mh-code-review ~/.claude/skills/
 
 # Codex CLI
-cp -r skills/<skill-name> ~/.codex/skills/
+cp -r skills/mh-code-review ~/.codex/skills/
 
 # Gemini CLI
-cp -r skills/<skill-name> ~/.gemini/skills/
+cp -r skills/mh-code-review ~/.gemini/skills/
 ```
 
 ### 多 Agent 共用（symlink）
@@ -48,21 +54,21 @@ cp -r skills/<skill-name> ~/.gemini/skills/
 
 ```bash
 # 1. 以 Claude Code 為主要安裝位置
-cp -r skills/<skill-name> ~/.claude/skills/
+cp -r skills/mh-code-review ~/.claude/skills/
 
 # 2. 其他 agent 透過 symlink 共用
-ln -s ~/.claude/skills/<skill-name> ~/.codex/skills/<skill-name>
-ln -s ~/.claude/skills/<skill-name> ~/.gemini/skills/<skill-name>
+ln -s ~/.claude/skills/mh-code-review ~/.codex/skills/mh-code-review
+ln -s ~/.claude/skills/mh-code-review ~/.gemini/skills/mh-code-review
 ```
 
 或以 `.agents/skills/` 作為共用中心（Codex 和 Gemini 原生支援）：
 
 ```bash
 # 1. 安裝到共用路徑
-cp -r skills/<skill-name> ~/.agents/skills/
+cp -r skills/mh-code-review ~/.agents/skills/
 
 # 2. Claude Code 透過 symlink 引用
-ln -s ~/.agents/skills/<skill-name> ~/.claude/skills/<skill-name>
+ln -s ~/.agents/skills/mh-code-review ~/.claude/skills/mh-code-review
 ```
 
 > **注意**：symlink 請使用絕對路徑（如 `~/.claude/skills/...`），避免相對路徑因工作目錄不同而失效。

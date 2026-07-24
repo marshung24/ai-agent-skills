@@ -27,6 +27,12 @@ Author: Mars.Hung (tfaredxj@gmail.com)
 
 `<year>` 替換為建立年份。
 
+此外，README 標題下方必須有版本行（**版本號統一放 README，不放 SKILL.md frontmatter 的 metadata**；更新日期為最近一次實質修改日）：
+
+```markdown
+> **版本**：x.y.z｜**更新日期**：YYYY-MM-DD
+```
+
 ## YAML 規範
 
 必填：
@@ -83,7 +89,7 @@ Author: Mars.Hung (tfaredxj@gmail.com)
 - SKILL.md 是路由器（守門 → 分流 → 載入規則），不是知識庫
 - 與 references 不重複內容（單一事實來源）
 - 連結可作為導航索引，但載入條件要用明確文字寫出
-- SKILL.md 行數指標：🟢 ≤100 行優良；🟡 101–150 行視狀況下沉，不強拆；🔴 ≥151 行需收斂，部分內容應下沉到 references
+- SKILL.md 行數指標：🟢 ≤100 行優良；🟡 101–200 行視狀況下沉，不強拆；🔴 ≥201 行需收斂，部分內容應下沉到 references
 
 > Token 經濟性方法論、A/B 對照範例、檢查清單：[BEST-PRACTICES.md](BEST-PRACTICES.md)
 

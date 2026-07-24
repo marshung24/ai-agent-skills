@@ -1,5 +1,7 @@
 # mh-code-review
 
+> **版本**：1.0.0｜**更新日期**：2026-07-24
+
 程式碼審查（自我 review / PR review），依風險優先序檢查，支援 GitHub PR 操作。
 
 ## Docs

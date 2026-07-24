@@ -27,6 +27,12 @@ Author: Mars.Hung (tfaredxj@gmail.com)
 
 `<year>` 替換為建立年份。
 
+此外，README 標題下方必須有版本行（**版本號統一放 README，不放 SKILL.md frontmatter 的 metadata**；更新日期為最近一次實質修改日）：
+
+```markdown
+> **版本**：x.y.z｜**更新日期**：YYYY-MM-DD
+```
+
 ## YAML 規範
 
 必填：

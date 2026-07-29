@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ask-agy.sh — 詢問 Antigravity（agy，非互動 print 模式），以 conversation id 明確延續同一段對話
+# ask-agy.sh — 詢問 Antigravity（agy，非互動 print 模式），以明確 session_id 延續同一段對話
 #
 # 用途：讓呼叫端 AI 把 Antigravity 當顧問諮詢，並在同一任務內延續前文。
 #
@@ -17,17 +17,33 @@
 #
 # I/O：
 #   輸入  ─ prompt：由參數（優先）或 stdin 傳入
-#           -r <conversation_id>：要延續的對話（省略則開新）
+#           -r <session_id>：要延續的對話（省略則開新）
 #   輸出  ─ stdout：agy 回覆純文字；最後一行 `[External Advisor agy session_id: <id>]`（供下次 -r 延續）
-#   結束碼─ 0 成功；2 參數錯誤；3 resume id 不存在；1 執行失敗且無回覆；127 缺依賴
+#   結束碼─ 0 成功；2 參數錯誤；3 resume id 不存在；1 執行失敗（無回覆，或 CLI 非零時
+#           不信任 stdout 的殘缺內容；可能已有部分副作用）；127 缺依賴
 #
 # 用法：
 #   ask-agy.sh "問題"                      # 開新對話（id 由磁碟偵測取得）
-#   ask-agy.sh -r <conversation_id> "追問"  # 延續指定對話
+#   ask-agy.sh -r <session_id> "追問"  # 延續指定對話
 #   echo "很長的問題" | ask-agy.sh -r <id>  # prompt 走 stdin，免引號轉義
 #   ask-agy.sh -- "-開頭的問題"             # prompt 以 - 開頭時，加 -- 結束選項解析
 
 set -uo pipefail
+
+# ── 自述（供 advisor-list.sh 組裝清單）──
+# 必須擺在 getopts 與依賴檢查之前：getopts 不認識長選項會落入錯誤分支 exit 2，
+# 而 CLI 未安裝時也該印得出自述（清單要能列出「已啟用但尚未安裝」的顧問）
+# {SELF} 由 advisor-list.sh 替換為本腳本絕對路徑
+if [ "${1:-}" = "--info" ]; then
+  cat <<'EOF'
+agy｜Antigravity
+  開新：{SELF} "問題"
+  延續：{SELF} -r <session_id> "追問"
+  ⚠ 開新對話不可並行（id 靠共用磁碟狀態偵測，並行會錯配）
+  ⚠ 實驗性：id 靠 agy 內部儲存路徑偵測，agy 升版可能失效
+EOF
+  exit 0
+fi
 
 # agy 對話儲存位置（版本相依，見檔頭 DECISION）
 BRAIN="$HOME/.gemini/antigravity-cli/brain"
@@ -37,7 +53,7 @@ LASTMAP="$HOME/.gemini/antigravity-cli/cache/last_conversations.json"
 command -v agy >/dev/null || { echo "錯誤：找不到 agy CLI，請先安裝並登入" >&2; exit 127; }
 command -v jq  >/dev/null || { echo "錯誤：找不到 jq（解析 last_conversations.json 需要）" >&2; exit 127; }
 
-# ── 參數解析：-r <conversation_id> 為可選的延續目標 ──
+# ── 參數解析：-r <session_id> 為可選的延續目標 ──
 RESUME=""
 while getopts "r:" opt; do
   case "$opt" in
@@ -45,7 +61,7 @@ while getopts "r:" opt; do
        # 空字串 id 必擋：呼叫端最常見寫法是 -r "$id"，id 擷取失敗時 $id 為空——
        # 若放行會靜默改走「開新對話」路徑重送 prompt，繞過 resume 失敗防線（重複執行風險）
        [ -n "$RESUME" ] || { echo "錯誤：-r 的 id 不可為空（上一輪 id 擷取可能失敗，請先檢查）" >&2; exit 2; } ;;
-    *) echo "用法: $0 [-r <conversation_id>] [--] \"<prompt>\"" >&2; exit 2 ;;
+    *) echo "用法: $0 [-r <session_id>] [--] \"<prompt>\"" >&2; exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -60,14 +76,14 @@ if [ -z "$PROMPT" ] && [ ! -t 0 ]; then PROMPT="$(cat)"; fi
 # ── resume 前置驗證 ──
 # id 格式限制：僅允許 UUID 字元集，防 `../` 之類路徑蒙混過目錄存在檢查
 if [ -n "$RESUME" ] && ! [[ "$RESUME" =~ ^[A-Za-z0-9-]+$ ]]; then
-  echo "錯誤：conversation id 格式不合法（僅允許英數與連字號）" >&2
+  echo "錯誤：session_id 格式不合法（僅允許英數與連字號）" >&2
   exit 2
 fi
 # id 對應的對話不存在即停（agy 對無效 id 會靜默開新，須在此擋下）
 if [ -n "$RESUME" ] && [ ! -d "$BRAIN/$RESUME" ]; then
   # 注意：${RESUME} 必須帶大括號——後面緊接全形字時，bash 會把多位元組字元
   # 的首位元組黏進變數名（set -u 下報 unbound variable）
-  echo "錯誤：resume 失敗（conversation id 不存在：${RESUME}）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。" >&2
+  echo "錯誤：resume 失敗（對應的對話不存在：${RESUME}）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。" >&2
   exit 3
 fi
 
@@ -120,5 +136,5 @@ printf '%s\n' "$ANSWER"
 if [ -n "$CID" ]; then
   printf '\n[External Advisor agy session_id: %s]\n' "$CID"
 else
-  echo "[warn] 未取得 conversation id（brain 目錄偵測失敗），本段對話無法延續" >&2
+  echo "[warn] 未取得 session_id（brain 目錄偵測失敗），本段對話無法延續" >&2
 fi

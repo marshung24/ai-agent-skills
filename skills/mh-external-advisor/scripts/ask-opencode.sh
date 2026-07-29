@@ -9,7 +9,8 @@
 #   輸入  ─ prompt：由參數（優先）或 stdin 傳入
 #           -r <session_id>：要延續的 Opencode session（省略則開新對話）
 #   輸出  ─ stdout：Opencode 回覆文字；最後一行 `[External Advisor opencode session_id: <id>]`（供下次 -r 延續）
-#   結束碼─ 0 成功；2 參數錯誤；3 resume 失敗；1 執行失敗且無回覆；
+#   結束碼─ 0 成功；2 參數錯誤；3 resume 失敗；1 執行失敗（無回覆或回覆不可採信，
+#           可能已有部分副作用）；
 #           127 缺依賴（CLI/jq 未安裝，或偵測不到免互動旗標）
 #
 # 用法：
@@ -20,6 +21,19 @@
 
 # 不用 set -e：需自行分流處理各執行失敗情境，不可讓非零結束碼直接中止
 set -uo pipefail
+
+# ── 自述（供 advisor-list.sh 組裝清單）──
+# 必須擺在 getopts 與依賴檢查之前：getopts 不認識長選項會落入錯誤分支 exit 2，
+# 而 CLI 未安裝時也該印得出自述（清單要能列出「已啟用但尚未安裝」的顧問）
+# {SELF} 由 advisor-list.sh 替換為本腳本絕對路徑
+if [ "${1:-}" = "--info" ]; then
+  cat <<'EOF'
+opencode｜Opencode
+  開新：{SELF} "問題"
+  延續：{SELF} -r <session_id> "追問"
+EOF
+  exit 0
+fi
 
 # ── 前置檢查：依賴不存在時立即明確報錯 ──
 command -v opencode >/dev/null || { echo "錯誤：找不到 opencode CLI，請先安裝並登入" >&2; exit 127; }
@@ -94,8 +108,11 @@ ANSWER="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
 # session id：取第一個帶 sessionID 的事件
 SID="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
   | map(.sessionID // empty) | map(select(. != "")) | first // empty' "$LOG")"
-# resume 時若事件未帶 id，沿用傳入的 RESUME 以維持延續性
-[ -n "$RESUME" ] && [ -z "$SID" ] && SID="$RESUME"
+# 輸出契約防護：id 必須是單行可見字元，否則末行標記會被撐成多行或被偽造
+# DECISION: 不比照 agy 的嚴格字元集、且驗證擺在 RESUME 沿用之前——理由同 ask-codex.sh
+if [ -n "$SID" ] && ! [[ "$SID" =~ ^[[:graph:]]+$ ]]; then SID=""; fi
+# resume 時若事件未帶合格 id，沿用傳入的 RESUME 以維持延續性
+if [ -n "$RESUME" ] && [ -z "$SID" ] && [[ "$RESUME" =~ ^[[:graph:]]+$ ]]; then SID="$RESUME"; fi
 
 # ── 輸出：回覆 + 供延續的 session id；失敗時連 stderr 一起印出供診斷 ──
 if [ -z "$ANSWER" ]; then

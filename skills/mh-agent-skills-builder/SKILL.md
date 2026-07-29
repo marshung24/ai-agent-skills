@@ -43,7 +43,8 @@ Author: Mars.Hung (tfaredxj@gmail.com)
 - `license`：授權說明（如 `Complete terms in LICENSE.txt`）
 - `metadata`：任意鍵值對（作者、版本等，如 `author: Mars.Hung`）
 - `compatibility`：最多 500 字，環境需求（產品、套件、網路）
-- `allowed-tools`：預核准工具清單（實驗性，如 `Bash(git:*) Read`）
+- `allowed-tools`：預核准工具清單（如 `Bash(git:*) Read`）——列入者當輪免權限詢問；**不限制工具範圍**（清單外仍可用，照常詢問），故不是安全邊界。僅 Claude Code CLI 生效，Agent SDK 忽略
+- `disable-model-invocation`：設 `true` 則模型不會自行載入（description 也不進 context），只能由使用者打 `/name` 觸發。適合有副作用或需控制時機的 skill
 
 ## Description 設計
 

@@ -19,6 +19,12 @@
 | [mh-agent-skills-builder](skills/mh-agent-skills-builder/) | 協助建立、修改和優化 Agent Skills，含設計方法論、多種範本與最佳實踐 |
 | [mh-external-advisor](skills/mh-external-advisor/) | 外部 AI 顧問：非互動諮詢另一支 AI CLI（第二意見／交叉驗證），以明確 id 延續對話。⚠️ 以免互動核可旗標執行，僅限 sandbox／受控環境 |
 
+### Writing
+
+| Skill | 說明 |
+|-------|------|
+| [mh-humanizer-zh-tw](skills/mh-humanizer-zh-tw/) | 台灣正體 AI 寫作去痕：24 種核心模式＋5 種台灣補充模式、詞彙表與改寫範例 |
+
 ## Installation
 
 ### Skills 安裝路徑
@@ -72,7 +78,7 @@ cp -r skills/mh-code-review ~/.agents/skills/
 ln -s ~/.agents/skills/mh-code-review ~/.claude/skills/mh-code-review
 ```
 
-> **注意**：symlink 請使用絕對路徑（如 `~/.claude/skills/...`），避免相對路徑因工作目錄不同而失效。
+> **注意**：symlink 的相對路徑是相對**連結所在目錄**解析，與執行時的工作目錄無關，因此 `ln -s ../../.claude/skills/<skill> ~/.codex/skills/<skill>` 是安全的，整個家目錄搬移後也仍然有效。絕對路徑則相反——家目錄路徑一變就斷。兩種都可用，擇一即可。
 
 ## Contributing
 

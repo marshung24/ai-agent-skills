@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "marshung24",
+  "owner": {
+    "name": "mars.hung",
+    "url": "https://github.com/marshung24"
+  },
+  "description": "Mars Hung 的 Agent Skills 集合，遵循 Agent Skills 規格。",
+  "plugins": [
+    {
+      "name": "mars-skills",
+      "source": "./",
+      "description": "Agent Skills 集合：skill 建構方法論、程式碼審查、外部 AI 顧問（第二意見／交叉驗證）、台灣正體 AI 寫作去痕。",
+      "category": "engineering",
+      "keywords": [
+        "skills",
+        "code-review",
+        "advisor",
+        "second-opinion",
+        "zh-tw",
+        "traditional-chinese"
+      ],
+      "author": {
+        "name": "mars.hung",
+        "url": "https://github.com/marshung24"
+      },
+      "homepage": "https://github.com/marshung24/ai-agent-skills",
+      "repository": "https://github.com/marshung24/ai-agent-skills",
+      "license": "MIT"
+    }
+  ]
+}

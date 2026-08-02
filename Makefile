@@ -5,9 +5,9 @@
 #
 # repo 佈局：plugins/<name>/skills/<name>/，一個 plugin＝一個 skill。
 #
-# install 與 remove 在互動終端會跳兩段 checkbox 選單——先挑 agent，再挑 skill；
-# 在目標後加 -<agent> 會跳過 agent 那段，指定 SKILLS 會跳過 skill 那段。
-# update 兩段都不跳（更新本來就該全做）。
+# install 與 remove 在互動終端會跳出 agent × skill 的二維勾選矩陣：畫面即現況，
+# 改成什麼就同步成什麼（勾起來是裝、取消是移除）。指定 SKILLS 則跳過矩陣並維持
+# 只加不減。update 不跳矩陣（更新本來就該全做）。
 # 非互動情境（CI、pipe、< /dev/null）一律視為全部，不會停在等輸入。
 # 安裝方式則是 per-agent 固定的，沒有選項：
 #   claude／codex ─ marketplace：兩家吃同一份 .claude-plugin/marketplace.json，
@@ -59,38 +59,17 @@ help:     ## 顯示本說明
 		| sed -E 's/:[^#]*##[[:space:]]*/\t/' \
 		| sort \
 		| awk -F'\t' '{ printf "  %-10s %s\n", $$1, $$2 }'
-	@printf '\n限定單一 agent：在目標後加 -<agent>；省略時 install/remove 會跳選單讓你挑\n'
-	@printf '  可用 agent：$(AGENTS)\n'
-	@printf '  例：make install-claude / make remove-codex / make status-agy\n'
-	@printf '  （help 與 validate 不分 agent）\n'
+	@printf '\n涵蓋的 agent：$(AGENTS)\n'
+	@printf '  install／remove 會跳矩陣，直接在格子上逐 agent 取捨，不需要另外指定\n'
 	@printf '\n變數：\n'
-	@printf '  %-10s %s\n' SKILLS '只處理指定的 skill；不設＝install/remove 跳選單挑'
+	@printf '  %-10s %s\n' SKILLS '只處理指定的 skill（只加不減）；不設＝跳矩陣'
 	@printf '  %-10s %s\n' SOURCE '覆寫 marketplace 來源；開發時裝工作目錄的內容用 SOURCE=$$PWD'
 	@printf '  %-10s %s\n' FORCE  '1 ＝略過「另一種機制留有殘留」的偵測（會造成 skill 重複載入）'
 	@printf '\n範例：\n'
 	@printf '  %-46s %s\n' 'make status'                                   '看各家現況（有殘留才會多列出來）'
-	@printf '  %-46s %s\n' 'make install'                                  '跳選單：先挑 agent，再挑 skill'
-	@printf '  %-46s %s\n' 'make remove'                                   '同樣是兩段選單'
-	@printf '  %-46s %s\n' 'make install-claude'                           '點名 agent，只剩 skill 那段選單'
-	@printf '  %-46s %s\n' 'make install SKILLS=mh-code-review'            '兩段都指定，完全不跳選單'
-	@printf '  %-46s %s\n' 'make update'                                   '全做，不跳選單'
+	@printf '  %-46s %s\n' 'make install'                                  '跳矩陣：逐 agent、逐 skill 勾選'
+	@printf '  %-46s %s\n' 'make remove'                                   '同一個矩陣，起始全空'
+	@printf '  %-46s %s\n' 'make install SKILLS=mh-code-review'            '指定就不跳矩陣，且只加不減'
+	@printf '  %-46s %s\n' 'make update'                                   '全做，不跳矩陣'
 	@printf '  %-46s %s\n' 'make install SOURCE=$$PWD'                      '開發時改裝工作目錄的內容'
-	@printf '  %-46s %s\n' 'make remove-agy'                               'remove 會連另一種機制的殘留一起清'
 
-# 單一 agent 的操作：make install-codex / make remove-agy / make status-claude …
-# 用 pattern rule 避免為 4 agent × 4 動作寫 16 個目標
-#
-# DECISION: 這些目標刻意不列進 .PHONY——GNU make 對 .PHONY 目標會跳過隱含／pattern 規則比對，
-#           列進去會讓 `make status-codex` 變成「Nothing to be done」。同名檔案不存在，
-#           不列 .PHONY 也不會誤判為已是最新
-install-%:
-	@$(TOOL) install $*
-
-remove-%:
-	@$(TOOL) remove $*
-
-update-%:
-	@$(TOOL) update $*
-
-status-%:
-	@$(TOOL) status $*

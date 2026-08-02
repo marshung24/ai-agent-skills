@@ -449,14 +449,6 @@ pick_skills() {
   return 0
 }
 
-# pick_agents <動詞> — 讓使用者挑要處理哪幾家 agent，結果寫進全域 TARGETS
-# I/O：輸入顯示用動詞；回 0 ＝繼續；回 1 ＝使用者取消
-pick_agents() {
-  pick_list agent "$1" agent_desc < <(printf '%s\n' $ALL_AGENTS) || return 1
-  TARGETS="$PICKED"
-  return 0
-}
-
 # agent_skills_dir <agent> — 取得該 agent 的使用者級 skills 目錄（copy 模式的安裝目的地）
 # I/O：輸入 agent 代號；輸出目錄絕對路徑到 stdout（不保證該目錄存在）；未知代號回 1
 # 路徑依 Agent Skills 標準；codex 另受 $CODEX_HOME 影響（未設時預設 ~/.codex），
@@ -496,6 +488,180 @@ agent_mode() {
 agent_source() {
   [ -n "$SOURCE_OVERRIDE" ] && { printf '%s\n' "$SOURCE_OVERRIDE"; return; }
   printf '%s\n' "${GITHUB_SOURCE:-$REPO_ROOT}"
+}
+
+# ════════════════ 二維勾選矩陣（agent × skill）════════════════
+#
+# 安裝狀態本來就是 agent × skill 的二維資料。壓成一維清單就得補上「聚合成幾態」
+# 「預設勾選哪個方向」「執行前的差異預覽」等一堆補丁；直接畫成格子則全部不需要——
+# 畫面本身就是狀態，使用者改成什麼就同步成什麼。
+#
+# 勾選框一律代表「**應該裝著**」，install 與 remove 共用同一個意義：
+#   install ─ 起始狀態＝現況，改完即同步（勾起來是裝、取消是移除）
+#   remove  ─ 起始狀態＝全空（Enter 就是清光），可再勾回想留下的
+#
+# 結果寫入關聯陣列 TGT；呼叫端以 CUR 與 TGT 的差集算出每個 agent 要裝／要移除什麼。
+
+declare -A CUR   # CUR[agent,skill]=1 表示目前裝著
+declare -A TGT   # TGT[agent,skill]=1 表示使用者希望裝著
+
+# matrix_load — 掃出目前的安裝狀態，填入 CUR
+# I/O：無參數；填 CUR；進度提示走 stderr
+# DECISION: 每個 agent 只查一次 CLI 再逐 skill 比對，不是每格各查一次——
+#           `claude plugin list` 約 0.16s，16 格各查一次會拖到 2 秒以上
+matrix_load() {
+  local a s mode dir listing
+  for a in $ALL_AGENTS; do
+    mode="$(agent_mode "$a")" || continue
+    have "$a" || continue
+    if [ "$mode" = marketplace ]; then
+      listing="$(eval "$a plugin list" 2>/dev/null)"
+      while IFS= read -r s; do
+        case "$a" in
+          claude) grep -qF "$s@$MARKETPLACE" <<<"$listing" && CUR["$a,$s"]=1 ;;
+          codex)  awk -v p="$s@$MARKETPLACE" '$1==p { sub(/^[^ \t]+[ \t]+/,""); print; exit }' \
+                    <<<"$listing" | grep -q '^installed' && CUR["$a,$s"]=1 ;;
+        esac
+      done < <(repo_skills)
+    else
+      dir="$(agent_skills_dir "$a")"
+      while IFS= read -r s; do
+        { [ -e "$dir/$s" ] || [ -L "$dir/$s" ]; } && CUR["$a,$s"]=1
+      done < <(repo_skills)
+    fi
+  done
+}
+
+# matrix_agents — 這次要顯示在格子裡的 agent（CLI 沒裝的不列，選了也沒用）
+matrix_agents() {
+  local a
+  for a in $TARGETS; do have "$a" && printf '%s\n' "$a"; done
+}
+
+# pick_matrix <動詞> — agent × skill 的二維勾選介面
+# I/O：輸入顯示用動詞（安裝｜移除）；畫面走 stderr；結果寫入 TGT
+#      回 0 ＝確定；回 1 ＝取消
+pick_matrix() {
+  local verb="$1"
+  local rows=() cols=() nr nc r c i cur_r=0 cur_c=0 key rest
+  local namew colw=() total btn=0 on_btn=0
+  local up clr hide show bold dim rev rst
+  local -A init
+
+  while IFS= read -r i; do rows+=("$i"); done < <(repo_skills)
+  while IFS= read -r i; do cols+=("$i"); done < <(matrix_agents)
+  nr=${#rows[@]}; nc=${#cols[@]}
+  { [ "$nr" -gt 0 ] && [ "$nc" -gt 0 ]; } || return 0
+
+  # 起始狀態：install 用現況，remove 從全空開始
+  for r in "${rows[@]}"; do for c in "${cols[@]}"; do
+    if [ "$verb" = 安裝 ] && [ "${CUR[$c,$r]:-}" = 1 ]; then TGT["$c,$r"]=1; else TGT["$c,$r"]=0; fi
+    init["$c,$r"]="${TGT[$c,$r]}"
+  done; done
+
+  up="$(tput cuu1)"; clr="$(tput el)"; hide="$(tput civis)"; show="$(tput cnorm)"
+  bold="$(tput bold)"; dim="$(tput dim)"; rev="$(tput rev)"; rst="$(tput sgr0)"
+
+  namew=0
+  for i in "${rows[@]}"; do [ "$(str_width "$i")" -gt "$namew" ] && namew="$(str_width "$i")"; done
+  namew=$((namew + 2))
+  total=$((2 + namew)); for i in "${cols[@]}"; do
+    c=$(( ${#i} > 3 ? ${#i} : 3 )); colw+=($((c + 2))); total=$((total + c + 2)); done
+
+  tui_restore() { printf '%s' "$show" >&2; trap - INT TERM HUP; }
+  trap 'tui_restore; return 1' INT TERM HUP
+
+  # 畫面共 nr + 3 列（表頭、格子、空列、按鈕列）
+  draw() {
+    local r c line box
+    printf '%s%s' "$clr" "$(printf '%*s' $((2 + namew)) '')" >&2
+    for (( c=0; c<nc; c++ )); do printf '%s%s%s' "$dim" "$(pad "${cols[c]}" "${colw[c]}")" "$rst" >&2; done
+    printf '\n' >&2
+    for (( r=0; r<nr; r++ )); do
+      [ "$r" = "$cur_r" ] && [ "$on_btn" = 0 ] && line="${bold}❯ ${rst}" || line="  "
+      line+="$(pad "${rows[r]}" "$namew")"
+      for (( c=0; c<nc; c++ )); do
+        [ "${TGT[${cols[c]},${rows[r]}]}" = 1 ] && box="[x]" || box="[ ]"
+        [ "${CUR[${cols[c]},${rows[r]}]:-}" = 1 ] && box="${bold}${box}${rst}" || box="${dim}${box}${rst}"
+        [ "$r" = "$cur_r" ] && [ "$c" = "$cur_c" ] && [ "$on_btn" = 0 ] && box="${rev}${box}${rst}"
+        line+="$(printf '%s%*s' "$box" $(( colw[c] - 3 )) '')"
+      done
+      printf '%s%s\n' "$clr" "$line" >&2
+    done
+    printf '%s\n' "$clr" >&2
+    line="$(printf '%*s' $((2 + namew)) '')"
+    for i in 0 1 2; do
+      case $i in 0) box=" 還原 ";; 1) box=" 取消 ";; 2) box=" 確定 ";; esac
+      [ "$on_btn" = 1 ] && [ "$btn" = "$i" ] && line+="${rev}[${box}]${rst}  " || line+="[${box}]  "
+    done
+    printf '%s%s\n' "$clr" "$line" >&2
+  }
+
+  # scope_toggle <範圍> — a/r/c 共用：範圍內有任一未勾就全勾，否則全不勾
+  scope_toggle() {
+    local scope="$1" r c any=0
+    for (( r=0; r<nr; r++ )); do for (( c=0; c<nc; c++ )); do
+      case "$scope" in
+        all) ;; row) [ "$r" = "$cur_r" ] || continue ;; col) [ "$c" = "$cur_c" ] || continue ;;
+      esac
+      [ "${TGT[${cols[c]},${rows[r]}]}" = 0 ] && any=1
+    done; done
+    for (( r=0; r<nr; r++ )); do for (( c=0; c<nc; c++ )); do
+      case "$scope" in
+        all) ;; row) [ "$r" = "$cur_r" ] || continue ;; col) [ "$c" = "$cur_c" ] || continue ;;
+      esac
+      TGT["${cols[c]},${rows[r]}"]=$any
+    done; done
+  }
+
+  printf '\n要%s哪些（%s粗體＝目前已裝%s）\n%s↑↓←→ 移動．空白 切換．a 全部／r 整列／c 整欄．Enter 確定．q 取消%s\n\n' \
+         "$verb" "$dim" "$rst" "$dim" "$rst" >&2
+  printf '%s' "$hide" >&2
+  draw
+
+  while :; do
+    IFS= read -rsn1 key < /dev/tty || key=q
+    if [ "$key" = $'\e' ]; then
+      read -rsn2 -t 0.05 rest < /dev/tty || rest=""
+      key="$key$rest"
+    fi
+    case "$key" in
+      $'\e[A'|k) if [ "$on_btn" = 1 ]; then on_btn=0; cur_r=$((nr-1)); else
+                   [ "$cur_r" = 0 ] && on_btn=1 || cur_r=$((cur_r-1)); fi ;;
+      $'\e[B'|j) if [ "$on_btn" = 1 ]; then on_btn=0; cur_r=0; else
+                   [ "$cur_r" = $((nr-1)) ] && on_btn=1 || cur_r=$((cur_r+1)); fi ;;
+      $'\e[D'|h) if [ "$on_btn" = 1 ]; then btn=$(( (btn+2) % 3 )); else cur_c=$(( (cur_c-1+nc) % nc )); fi ;;
+      $'\e[C'|l) if [ "$on_btn" = 1 ]; then btn=$(( (btn+1) % 3 )); else cur_c=$(( (cur_c+1) % nc )); fi ;;
+      ' ')       if [ "$on_btn" = 1 ]; then
+                   case "$btn" in
+                     0) for i in "${!init[@]}"; do TGT["$i"]="${init[$i]}"; done ;;
+                     1) tui_restore; printf '→ 已取消\n' >&2; return 1 ;;
+                     2) break ;;
+                   esac
+                 else
+                   [ "${TGT[${cols[cur_c]},${rows[cur_r]}]}" = 1 ] \
+                     && TGT["${cols[cur_c]},${rows[cur_r]}"]=0 || TGT["${cols[cur_c]},${rows[cur_r]}"]=1
+                 fi ;;
+      a|A)       scope_toggle all ;;
+      r|R)       scope_toggle row ;;
+      c|C)       scope_toggle col ;;
+      ''|$'\n')  if [ "$on_btn" = 1 ]; then
+                   case "$btn" in
+                     0) for i in "${!init[@]}"; do TGT["$i"]="${init[$i]}"; done ;;
+                     1) tui_restore; printf '→ 已取消\n' >&2; return 1 ;;
+                     2) break ;;
+                   esac
+                 else break; fi ;;
+      q|Q|$'\e') tui_restore; printf '→ 已取消\n' >&2; return 1 ;;
+      *)         continue ;;
+    esac
+    for (( i=0; i<nr+3; i++ )); do printf '%s' "$up" >&2; done
+    draw
+  done
+
+  tui_restore
+  printf '\n' >&2
+  return 0
 }
 
 # ════════════════ 遺留偵測：另一種機制留下的東西會重複載入 ════════════════
@@ -1153,17 +1319,66 @@ fi
 # 已在命令列點名 agent（如 make install-claude）時跳過 agent 那段，與 SKILLS 的邏輯一致。
 # DECISION: update 兩段都不跳——「把裝著的都更新到最新」本來就是它唯一合理的意圖，
 #           未安裝者本就會被略過，多問只是徒增步驟
-if [ -t 0 ] && [ -r /dev/tty ]; then
+USE_MATRIX=""
+if [ -z "$SKILLS" ] && [ -t 0 ] && [ -r /dev/tty ]; then
   case "$CMD" in
     install|remove)
       verb=安裝; [ "$CMD" = remove ] && verb=移除
-      [ -z "$EXPLICIT_TARGETS" ] && { pick_agents "$verb" || exit 0; }
-      [ -z "$SKILLS" ]           && { pick_skills "$verb" || exit 0; }
+      if tui_capable $(( $(repo_skills | wc -l) + 3 )); then
+        matrix_load
+        pick_matrix "$verb" || exit 0
+        USE_MATRIX=1
+      else
+        # 終端畫不下格子時退回一維選單（只挑 skill，套用到所有 agent）
+        pick_skills "$verb" || exit 0
+      fi
       ;;
   esac
 fi
 
 # ── install / remove / update ──
+# DECISION: 先印「計畫」再執行——方式與來源逐 agent 不同，單一行標頭必然對其中幾家是錯的。
+#           把解析結果攤開，使用者在動手前就能確認每家各自會用什麼方式、動到哪裡
+# ── 依矩陣執行：逐 agent 算出要裝什麼、要移除什麼 ──
+# DECISION: 不另寫執行邏輯，而是把差集塞進 SKILLS 再沿用既有的 marketplace_*／copy_* ——
+#           那些函式本來就是「處理 target_skills 列出的每個 skill」，重用可避免兩套實作漂移
+if [ -n "$USE_MATRIX" ]; then
+  printf '%s（差異更新）\n' "$CMD"
+  declare -A ADD_MAP RM_MAP
+  for a in $(matrix_agents); do
+    add=""; rm=""
+    while IFS= read -r sk; do
+      want="${TGT[$a,$sk]:-0}"; now="${CUR[$a,$sk]:-0}"
+      [ "$want" = 1 ] && [ "$now" != 1 ] && add+="$sk "
+      [ "$want" != 1 ] && [ "$now" = 1 ] && rm+="$sk "
+    done < <(repo_skills)
+    ADD_MAP[$a]="$add"; RM_MAP[$a]="$rm"
+    detail=""
+    [ -n "$add" ] && for sk in $add; do detail+="+$sk "; done
+    [ -n "$rm" ]  && for sk in $rm;  do detail+="-$sk "; done
+    printf '  '; pad "$a" 10; printf '%s\n' "${detail:-（無變化）}"
+  done
+
+  for a in $(matrix_agents); do
+    mode="$(agent_mode "$a")"
+    # 先移除再安裝：兩者若同時發生，先清掉舊的可避免中間狀態出現重複載入
+    if [ -n "${RM_MAP[$a]}" ]; then
+      SKILLS="${RM_MAP[$a]}"
+      if [ "$mode" = marketplace ]; then SOURCE="$(agent_source "$a")"; "marketplace_${a}_remove"
+      else skip_missing "$a" "$a" || copy_remove "$a"; fi
+      leftover_remove "$a"
+    fi
+    if [ -n "${ADD_MAP[$a]}" ]; then
+      SKILLS="${ADD_MAP[$a]}"
+      if [ "$mode" = marketplace ]; then SOURCE="$(agent_source "$a")"; "marketplace_${a}_install"
+      else skip_missing "$a" "$a" || copy_install "$a"; fi
+    fi
+  done
+  SKILLS=""
+  exit "$FAILED"
+fi
+
+# ── install / remove / update（非矩陣路徑：指定 SKILLS、或非互動）──
 # DECISION: 先印「計畫」再執行——方式與來源逐 agent 不同，單一行標頭必然對其中幾家是錯的。
 #           把解析結果攤開，使用者在動手前就能確認每家各自會用什麼方式、動到哪裡
 printf '%s（方式與來源）\n' "$CMD"
@@ -1175,13 +1390,11 @@ for a in $TARGETS; do
 done
 
 for a in $TARGETS; do
-  mode="$(agent_mode "$a")"
   # DECISION: 已下架的舊 plugin 必須在模式移除之前清——marketplace_*_remove 末端會在
   #           「本 repo 的 plugin 全數移除」時註銷 marketplace，一旦註銷，
   #           claude plugin list 就查不到那個舊 plugin，legacy 偵測會靜默失效
   # DECISION: 只在「處理全部 skill」時才清舊 plugin——舊的是含全部 skill 的整包，
-  #           無法只從中拿掉一個。選了部分 skill 卻連帶把整包移除，等於在使用者
-  #           沒要求的情況下擴大移除範圍；改為提示並保留，由使用者自行決定
+  #           無法只從中拿掉一個
   if [ "$CMD" = remove ]; then
     if [ -z "$SKILLS" ]; then
       legacy_remove "$a"
@@ -1192,17 +1405,15 @@ for a in $TARGETS; do
     fi
   fi
 
+  mode="$(agent_mode "$a")"
   if [ "$mode" = marketplace ]; then
-    # marketplace 模式每個 agent 各有實作，CLI 存在與否由各函式自行檢查
     SOURCE="$(agent_source "$a")"
     "marketplace_${a}_${CMD}"
   else
-    # copy 模式各家共用同一實作，故 CLI 檢查在此統一做
     skip_missing "$a" "$a" && continue
     "copy_${CMD}" "$a"
   fi
 
-  # remove 一律連另一種機制的殘留一起清——只清自己那一邊等於留著重複載入的來源
   [ "$CMD" = remove ] && leftover_remove "$a"
 done
 

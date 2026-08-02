@@ -57,8 +57,7 @@ codex plugin add mh-code-review@marshung24
 ```bash
 git clone https://github.com/marshung24/ai-agent-skills.git
 cd ai-agent-skills
-make install-agy        # → ~/.gemini/skills/
-make install-opencode   # → ~/.config/opencode/skills/
+make install            # 在矩陣上只勾 agy／opencode 那兩欄即可
 ```
 
 ### 用 make 一次處理四家
@@ -67,23 +66,29 @@ clone 之後，repo 附的 Makefile 可統一驅動四家：
 
 ```bash
 make status          # 各家現況；有殘留才會多列出來
-make install         # 四家一次裝對
-make install-codex   # 只處理指定 agent
-make update          # 更新
-make remove          # 移除（連另一種機制的殘留一起清）
+make install         # 跳出 agent × skill 矩陣，逐格勾選
+make update          # 更新（全做）
+make remove          # 同一個矩陣，起始全空
 make validate        # 離線驗證 manifest 與 skills 結構
 ```
 
-安裝方式是**每個 agent 固定的**，沒有 `METHOD` 可選：claude／codex 走 marketplace 並從 GitHub 安裝，agy／opencode 走複製。`install` 動手前會先印出解析後的計畫。
+安裝方式是**每個 agent 固定的**：claude／codex 走 marketplace 並從 GitHub 安裝，agy／opencode 走複製。
 
-只要其中幾個 skill 就加 `SKILLS`，四家一致：
+`install` 與 `remove` 會跳出 **agent × skill 的二維矩陣**——畫面就是現況，改成什麼就同步成什麼（勾起來是裝、取消是移除）：
 
-```bash
-make install SKILLS="mh-code-review mh-humanizer-zh-tw"
-make status                 # 逐 skill 顯示各家裝了哪些
+```
+                           claude  codex  agy  opencode
+❯ mh-agent-skills-builder  [ ]     [ ]    [ ]  [ ]
+  mh-code-review           [x]     [ ]    [x]  [ ]
+  mh-external-advisor      [ ]     [ ]    [ ]  [ ]
+  mh-humanizer-zh-tw       [x]     [ ]    [ ]  [ ]
+
+                           [ 還原 ]  [ 取消 ]  [ 確定 ]
 ```
 
-開發時要裝工作目錄的內容加 `SOURCE=$PWD`。
+`↑↓←→` 移動、`空白` 切換、`a`／`r`／`c` 切換全部／整列／整欄。確定後會先印出逐 agent 的增減再執行。
+
+要跳過矩陣直接指定：`make install SKILLS="mh-code-review"`（這條路徑只加不減）。開發時裝工作目錄的內容加 `SOURCE=$PWD`。
 
 > 兩種機制若同時存在，同一個 skill 會**重複載入**。因此安裝前會偵測另一種機制的殘留（舊版工具裝的、手動複製的），偵測到即中止並提示如何處理；確定要並存才加 `FORCE=1`。`remove` 一律兩邊都清。
 

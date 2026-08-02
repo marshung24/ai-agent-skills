@@ -1,6 +1,6 @@
 # tools/
 
-> **版本**：4.1.0｜**更新日期**：2026-08-01
+> **版本**：5.0.0｜**更新日期**：2026-08-02
 
 把本 repo 的 skills 安裝到各 AI agent。每個 skill 各自是一個 plugin，`install` 與 `remove` 會跳選單讓你挑；每個 agent 的安裝方式則是固定的，並在安裝前偵測另一種機制的殘留以免重複載入。
 
@@ -47,55 +47,76 @@ opencode 的全域 skills 來源有三處：`~/.config/opencode/skills/`、`~/.c
 
 `status` 也因此多一列 `共用／已掃到`，標出它實際從哪些別人的目錄載到 skill。
 
-## 互動選單
+## 互動矩陣
 
-`install` 與 `remove` 會跳**兩段**選單——先挑要處理哪幾家 agent，再挑哪幾個 skill。兩段共用同一組實作（`pick_list`／`pick_tui`／`pick_prompt`），只是餵入的清單與描述函式不同。
-
-```
-要安裝哪些 agent：↑↓ 移動．空白 勾選．a 全選／全不選．Enter 確認．q 取消
-
-❯ [x] claude    marketplace  https://github.com/marshung24/ai-agent-skills.git
-  [x] codex     marketplace  https://github.com/marshung24/ai-agent-skills.git
-  [ ] agy       copy         ~/.gemini/skills
-  [ ] opencode  copy         ~/.config/opencode/skills
-```
-
-接著是 skill 那段：
+`install` 與 `remove` 會跳出 **agent × skill 的二維勾選矩陣**：
 
 ```
-可安裝的 skill：↑↓ 移動．空白 勾選．a 全選／全不選．Enter 確認．q 取消
+要安裝哪些（粗體＝目前已裝）
+↑↓←→ 移動．空白 切換．a 全部／r 整列／c 整欄．Enter 確定．q 取消
 
-❯ [x] mh-agent-skills-builder  協助建立、修改和優化 Agent Skills，含設計方法論…
-  [x] mh-code-review           程式碼審查（自我 review／PR review），依風險優…
-  [ ] mh-external-advisor      外部 AI 顧問：非互動諮詢另一支 AI CLI（第二意見…
-  [x] mh-humanizer-zh-tw       台灣正體 AI 寫作去痕：24 種核心模式＋5 種台灣補…
+                           claude  codex  agy  opencode
+❯ mh-agent-skills-builder  [ ]     [ ]    [ ]  [ ]
+  mh-code-review           [x]     [ ]    [x]  [ ]
+  mh-external-advisor      [ ]     [ ]    [ ]  [ ]
+  mh-humanizer-zh-tw       [x]     [ ]    [ ]  [ ]
+
+                           [ 還原 ]  [ 取消 ]  [ 確定 ]
 ```
 
-**跳過條件**：在目標後加 `-<agent>`（如 `make install-claude`）跳過 agent 那段；指定 `SKILLS` 跳過 skill 那段；兩者都給就完全不跳。`update` 兩段都不跳——更新本來就該全做。
+> **DECISION**：安裝狀態本來就是 agent × skill 的二維資料。壓成一維清單就得補上「聚合成幾態」「預設勾選哪個方向」「執行前的差異預覽」等一連串補丁，而且會產生語意矛盾——取消勾選一個已裝的 skill 卻不會移除它。直接畫成格子則全部不需要：**畫面本身就是狀態**，改成什麼就同步成什麼。
+
+**勾選框一律代表「應該裝著」**，兩個指令共用同一個意義，差別只在起始狀態：
+
+| 指令 | 起始 | 直接 Enter 的效果 |
+|------|------|------------------|
+| `install` | 現況 | 無變化 |
+| `remove` | 全空 | 清光全部（可再勾回想留下的） |
+
+因此 `install` 天生就是差異更新：勾起來是裝、取消是移除。
+
+### 按鍵
 
 | 按鍵 | 行為 |
 |------|------|
-| `↑` `↓`（或 `k` `j`） | 移動 |
-| `空白` | 勾選／取消該項 |
-| `a` | 有任何未勾選就全選，否則全不選 |
-| `Enter` | 確認；一個都沒選視同取消 |
-| `q`／`Esc`／`Ctrl-C` | 取消，不動任何東西 |
+| `↑` `↓` `←` `→`（或 `k` `j` `h` `l`） | 移動；由最後一列再往下即進入按鈕列 |
+| `空白` | 切換該格；在按鈕列上則是按下該鈕 |
+| `a` | 全部：**有任一格未勾就全勾**，否則全不勾 |
+| `r` | 整列（該 skill 的所有 agent），判準同上 |
+| `c` | 整欄（該 agent 的所有 skill），判準同上 |
+| `Enter` | 在格子上＝確定；在按鈕列上＝按下該鈕 |
+| `q`／`Esc`／`Ctrl-C` | 取消 |
+| `還原` 鈕 | 回到進入矩陣時的狀態 |
 
-預設全部勾選——最常見的意圖就是「全部」，Enter 直接過。skill 描述取自 manifest，不另寫一份。
+粗體的格子代表**目前已裝**，與勾選狀態分開顯示——所以看得出「這格本來就有」還是「這次才勾的」。
 
-> **DECISION**：不引入 `fzf`／`whiptail`／`dialog`。本 repo 目前只依賴 `jq` 與 `rsync`，為了一個選單多一個必裝的外部程式並不划算；純 bash + `tput` 自足且行為可控。代價是要自己處理游標與重畫——選單靠「游標上移 N 行再重畫」更新，任何一行折行都會讓行數對不上而畫壞，故每列都以 `fit()` 依**顯示寬度**截斷（CJK 算 2 欄，與 `pad()` 同一套判準）。中斷時以 `trap` 還原游標，避免使用者的終端一直看不到游標。
+### 執行前的差異
 
-### 兩層退路
+確定後先印出逐 agent 的增減，再實際執行：
+
+```
+install（差異更新）
+  claude    +mh-agent-skills-builder +mh-external-advisor
+  codex     +mh-agent-skills-builder +mh-code-review
+  agy       （無變化）
+  opencode  -mh-code-review
+```
+
+同一個 agent 若同時有增有減，**先移除再安裝**——兩者若同時發生，先清掉舊的可避免中間狀態出現重複載入。
+
+### 退路
 
 | 情境 | 行為 |
 |------|------|
-| 互動終端且 `tput` 可用 | checkbox 選單 |
-| `TERM=dumb`、非 xterm 相容、或無 `tput` | 退回**編號輸入版**（`1,3` 或 `2 4`／`a`／`q`），仍可挑 |
-| 非互動（CI、pipe、`< /dev/null`） | 不跳選單，視為全部 |
+| 互動終端且畫得下 | 二維矩陣 |
+| 終端太小／`TERM=dumb`／無 `tput` | 退回一維 skill 選單（套用到所有 agent） |
+| 非互動（CI、pipe、`< /dev/null`） | 不跳，視為全部 |
 
-最後一層是關鍵：判準是 `[ -t 0 ]` 且 `/dev/tty` 可讀，缺一即視為全部——少了這道判斷，`make install < /dev/null` 會停在 `read` 等一個永遠不會來的輸入，把自動化流程弄壞。指定 `SKILLS` 時也不會多問一次。
+判準是 `[ -t 0 ]` 且 `/dev/tty` 可讀，缺一即視為全部——少了這道判斷，`make install < /dev/null` 會停在 `read` 等一個永遠不會來的輸入。
 
-> `update` 刻意不跳選單：「把裝著的都更新到最新」本來就是它唯一合理的意圖，未安裝者本就會被略過。
+> **`SKILLS=` 維持只加不減**。矩陣產出的是**完整的目標狀態**（每一格都明確勾或不勾），差異更新才有定義；`SKILLS=` 只給了一份正向清單，推導不出「其餘都要移除」。這樣既有腳本的行為完全不變，只有你在矩陣上明確看過全貌時才會發生移除。
+>
+> `update` 不跳矩陣：「把裝著的都更新到最新」本來就是它唯一合理的意圖，未安裝者本就會被略過。
 
 ## 遺留偵測
 
@@ -116,11 +137,10 @@ opencode 的全域 skills 來源有三處：`~/.config/opencode/skills/`、`~/.c
 
 ```bash
 make status          # 各家現況；有殘留才會多列出來
-make install         # 四家；跳選單挑要裝哪些 skill
-make remove          # 同樣會跳選單
-make install SKILLS="mh-code-review mh-humanizer-zh-tw"   # 直接指定，略過選單
+make install         # 跳出 agent × skill 矩陣，逐格勾選
+make remove          # 同一個矩陣，起始全空
+make install SKILLS="mh-code-review mh-humanizer-zh-tw"   # 略過矩陣，只加不減
 make install SOURCE=$PWD          # 開發時改裝工作目錄的內容
-make install-claude               # 單一 agent：install|remove|update|status -<agent>
 make remove
 make update
 make validate        # 離線驗證，不需註冊
@@ -182,8 +202,7 @@ copy 方式逐 skill 標示：
 | `install opencode`（claude 目錄有東西） | 跨 agent 守衛擋下，rc=1 |
 | `update` | rc=0；codex 未註冊時正確略過 |
 | 未知 agent／子命令／skill 名 | rc=2 |
-| 兩段選單串接（以 PTY 實測） | agent 段選 claude+codex、skill 段選一個，實際安裝結果相符；點名 agent 時正確跳過第一段 |
-| checkbox 選單（以 PTY 實測） | ↑↓ 與 k/j 移動、空白勾選、`a` 全選／全不選、Enter、`q`／`Esc` 取消、全不選視同取消，皆正確；取消後確認未安裝任何東西 |
+| 二維矩陣（以 PTY 實測） | 起始狀態正確反映現況；`a`／`r`／`c` 在「有未勾」時皆為先全勾；同一 agent 增減並存正確；還原／取消／確定三鈕皆正確（取消後狀態未變） |
 | 編號輸入版（`TERM=dumb`） | 正確退回，空白與逗號分隔、越界與非數字重問皆正確 |
 | 非互動（`< /dev/null`、pipe） | 不跳選單、不卡住，視為全部 |
 

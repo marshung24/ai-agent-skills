@@ -1,0 +1,4 @@
+{
+  "name": "mh-external-advisor",
+  "description": "外部 AI 顧問：非互動諮詢另一支 AI CLI（第二意見／交叉驗證），以明確 id 延續對話。⚠️ 以免互動核可旗標執行，僅限 sandbox／受控環境。"
+}

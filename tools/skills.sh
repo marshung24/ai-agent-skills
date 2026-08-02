@@ -4,10 +4,16 @@
 # 用途：各 agent 的安裝機制與 CLI 介面互不相同。本腳本把差異封裝起來，對外只暴露一組子命令。
 #
 #       使用案例：
-#         tools/skills.sh install                     # 四家一次裝對
+#         tools/skills.sh install                     # 四家；互動終端會跳選單挑 skill
 #         tools/skills.sh status                      # 看各家現況
 #         SOURCE=$PWD tools/skills.sh install         # 開發時改裝工作目錄的內容
 #         tools/skills.sh remove agy                  # 單一 agent
+#
+# repo 佈局：plugins/<name>/skills/<name>/SKILL.md，plugin 名與 skill 名一致。
+#   marketplace 的 source 指向 plugins/<name>/，故各 agent 的快取只含該 plugin 的內容
+#   （實測 508K → 64K）；plugins/<name>/plugin.json 則讓 agy 也能單獨安裝該 skill。
+#   source 不可指向 skills/<name>/ 本身——Codex 的掃描只認 <plugin root>/skills/<name>/SKILL.md，
+#   Claude 雖支援「plugin root 直放 SKILL.md」但那是它獨有的（實測，見 docs/marketplace-guide.md）。
 #
 # 安裝方式是 per-agent 固定的，沒有選項（見 agent_mode）：
 #   | agent    | 方式        | 依據                                                    |
@@ -47,6 +53,7 @@
 # I/O：
 #   輸入  ─ $1     子命令：install | remove | update | status | validate
 #           $2..   agent 代號：claude | codex | agy | opencode（可多個；省略＝全部）
+#           SKILLS 環境變數：只處理指定的 skill；不設時 install/remove 會跳互動選單
 #           SOURCE 環境變數：覆寫 marketplace 來源；開發時用 SOURCE=$PWD
 #           FORCE  環境變數：非空 ＝ 略過遺留偵測
 #   輸出  ─ 進度與結果走 stdout；警告與錯誤走 stderr
@@ -65,34 +72,43 @@ command -v jq >/dev/null || { echo "錯誤：找不到 jq（讀取 manifest 需�
 [ -f "$MANIFEST" ] || { echo "錯誤：找不到 $MANIFEST" >&2; exit 127; }
 
 # ── 名稱一律讀自 manifest ──
-# DECISION: 不在腳本內寫死 marketplace／plugin 名稱——manifest 是這兩個名稱的單一事實來源，
-#           寫死會讓改名時出現「manifest 改了、腳本沒改」的靜默失效
+# DECISION: 不在腳本內寫死任何名稱——manifest 是單一事實來源，寫死會讓改名時出現
+#           「manifest 改了、腳本沒改」的靜默失效
 MARKETPLACE="$(jq -r '.name' "$MANIFEST")"
-PLUGIN="$(jq -r '.plugins[0].name' "$MANIFEST")"
-[ -n "$MARKETPLACE" ] && [ -n "$PLUGIN" ] || { echo "錯誤：manifest 缺 name 或 plugins[0].name" >&2; exit 127; }
+[ -n "$MARKETPLACE" ] && [ "$MARKETPLACE" != null ] || { echo "錯誤：manifest 缺 name" >&2; exit 127; }
 
-# ── 可由環境變數覆寫的執行參數 ──
-# DECISION: 覆寫值另存為 SOURCE_OVERRIDE，不直接沿用 SOURCE——主流程會把「本輪 agent 解析出的
-#           來源」寫回 SOURCE 給 marketplace_* 函式讀，若判斷來源也是同一個變數，
-#           第一圈寫入後就會被誤認為「使用者有指定」，其餘 agent 全部沿用第一家的值
-SOURCE_OVERRIDE="${SOURCE:-}"
-FORCE="${FORCE:-}"
+# 每個 skill 各自是一個 plugin，plugin 名即 skill 名（entry 以 skills 欄位限定範圍）
+MP_PLUGINS="$(jq -r '.plugins[].name' "$MANIFEST")"
+[ -n "$MP_PLUGINS" ] || { echo "錯誤：manifest 的 plugins 為空" >&2; exit 127; }
 
-# 逐 agent 解析後填入，供 marketplace_* 函式讀取
-SOURCE=""
-
-ALL_AGENTS="claude codex agy opencode"
+# LEGACY_PLUGINS — 已從 marketplace 移除的舊 plugin 名，取自 manifest 的 renames
+# 這些名稱不再是 entry，但使用者機器上可能還裝著：
+#   claude 會標註「Removed from the marketplace」，plugin list 仍看得到
+#   codex  沒有 renames 概念，plugin list 直接看不到它，但 config.toml 與快取都還在，
+#          執行期照樣載入——是隱形卻仍在運作的孤兒，必須主動偵測
+LEGACY_PLUGINS="$(jq -r '(.renames // {}) | keys[]' "$MANIFEST" 2>/dev/null)"
 
 # GITHUB_SOURCE — 從 manifest 的 repository 欄位推導出可直接交給 CLI 的 Git URL
-# DECISION: 不寫死網址，比照 marketplace／plugin 名稱一律讀自 manifest，避免搬 repo 時兩處不同步
+# DECISION: 不寫死網址，比照其餘名稱一律讀自 manifest，避免搬 repo 時兩處不同步
 # DECISION: 用 HTTPS URL 而非 `owner/repo` 簡寫——簡寫在 Claude Code 預設走 SSH clone，
 #           沒有金鑰的使用者會直接失敗（需另設 CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1）；
 #           HTTPS URL 兩家都收，且不依賴使用者的 SSH 設定
-GITHUB_SOURCE="$(jq -r '.plugins[0].repository // empty' "$MANIFEST")"
+GITHUB_SOURCE="$(jq -r '[.plugins[].repository] | map(select(. != null)) | first // empty' "$MANIFEST")"
 case "$GITHUB_SOURCE" in
   https://*) GITHUB_SOURCE="${GITHUB_SOURCE%.git}.git" ;;
   *) GITHUB_SOURCE="" ;;   # 非 HTTPS 或未填：退回本機路徑，由 agent_source 處理
 esac
+
+# ── 可由環境變數覆寫的執行參數 ──
+# DECISION: SOURCE 的覆寫值另存為 SOURCE_OVERRIDE——主流程會把「本輪 agent 解析出的來源」
+#           寫回 SOURCE 給 marketplace_* 函式讀，若判斷來源也是同一個變數，
+#           第一圈寫入後就會被誤認為「使用者有指定」，其餘 agent 全部沿用第一家的值
+SOURCE_OVERRIDE="${SOURCE:-}"
+SOURCE=""      # 逐 agent 解析後填入，供 marketplace_* 函式讀取
+FORCE="${FORCE:-}"
+SKILLS="${SKILLS:-}"   # 空＝repo 內全部；否則只處理指定的那幾個（主流程會驗證名稱）
+
+ALL_AGENTS="claude codex agy opencode"
 FAILED=0   # 任一步驟失敗即設為 1，作為整體結束碼
 
 # ════════════════ 共用工具 ════════════════
@@ -154,15 +170,291 @@ report() {
   printf '  '; pad "$1" 10; pad "$2" 13; pad "$3" 8; printf '%s\n' "${4:-}"
 }
 
+# skill_dir <skill> — 該 skill 的原始檔位置
+# I/O：輸入 skill 名；輸出目錄絕對路徑到 stdout
+# 佈局為 plugins/<name>/skills/<name>/，plugin 名與 skill 名一致
+skill_dir() { printf '%s/plugins/%s/skills/%s\n' "$REPO_ROOT" "$1" "$1"; }
+
+# plugin_dir <skill> — 該 skill 所屬 plugin 的根目錄（marketplace 的 source 指向這裡）
+# I/O：輸入 skill 名；輸出目錄絕對路徑到 stdout
+plugin_dir() { printf '%s/plugins/%s\n' "$REPO_ROOT" "$1"; }
+
 # repo_skills — 列出 repo 內的 skill 名稱
 # I/O：無參數；每行一個名稱到 stdout（順序由 glob 決定，即字典序）
-# 判準與各家 plugin 的掃描規則一致：skills/ 下含 SKILL.md 的子目錄才算一個 skill，
-# 因此 template/ 或未完成的空目錄不會被誤認
+# 判準與各家的掃描規則一致：plugins/<name>/skills/<name>/SKILL.md 存在才算一個 skill，
+# 因此 template/ 或未完成的目錄不會被誤認
 repo_skills() {
-  local d
-  for d in "$REPO_ROOT"/skills/*/; do
-    [ -d "$d" ] && [ -f "${d}SKILL.md" ] && basename "$d"
+  local d n
+  for d in "$REPO_ROOT"/plugins/*/; do
+    n="$(basename "$d")"
+    [ -f "$d/skills/$n/SKILL.md" ] && printf '%s\n' "$n"
   done
+}
+
+# target_skills — 本次要處理的 skill 名稱
+# I/O：無參數（讀全域 SKILLS）；每行一個名稱到 stdout
+# SKILLS 未設＝repo 內全部；設了就只處理指定的那幾個（名稱已於主流程驗證過）
+target_skills() {
+  local s
+  if [ -z "$SKILLS" ]; then repo_skills; return; fi
+  for s in $SKILLS; do printf '%s\n' "$s"; done
+}
+
+# skill_desc <skill> — 取該 skill 在 manifest 裡的描述
+# I/O：輸入 skill 名；輸出描述文字到 stdout（沒有 entry 時輸出空字串）
+# 描述一律讀自 manifest，不在腳本內另寫一份，避免兩處不同步
+skill_desc() {
+  jq -r --arg n "$1" '(.plugins[] | select(.name==$n) | .description) // ""' "$MANIFEST" 2>/dev/null
+}
+
+# str_width <字串> — 依終端顯示寬度計算字串佔幾欄
+# I/O：輸入字串；輸出欄數到 stdout
+# 與 pad 同一套判準：多位元組字元算 2 欄、ASCII 算 1 欄
+# 計算式：顯示寬度 = 字元數 + (位元組數 − 字元數) / 2（推導見 pad 的註解）
+str_width() {
+  local s="$1" chars bytes
+  chars=${#s}; bytes=$(printf '%s' "$s" | wc -c)
+  printf '%d' $(( chars + (bytes - chars) / 2 ))
+}
+
+# fit <字串> <目標顯示寬度> — 依顯示寬度截斷，超出者以 … 收尾
+# I/O：輸入字串與上限寬度；輸出截斷後的字串到 stdout，保證顯示寬度不超過 limit
+# 之所以要截斷：選單靠「游標上移 N 行再重畫」更新，任何一行折行都會讓行數對不上而畫壞
+# DECISION: 省略號本身佔 2 欄，必須從預算裡先扣掉——只在超出時才補 … 而不預留寬度的話，
+#           截斷後的結果會比 limit 還寬，反而製造出它要防的折行
+fit() {
+  local s="$1" limit="$2" out="" w=0 i c cw budget
+  [ "$limit" -lt 1 ] && return
+  [ "$(str_width "$s")" -le "$limit" ] && { printf '%s' "$s"; return; }
+
+  # 省略號本身就要 2 欄，limit 小於 2 時連它都放不下，只能輸出空字串
+  budget=$((limit - 2))
+  [ "$budget" -lt 1 ] && { [ "$limit" -ge 2 ] && printf '…'; return; }
+  for (( i=0; i<${#s}; i++ )); do
+    c="${s:i:1}"
+    [ "${#c}" -eq 1 ] && [ "$(printf '%s' "$c" | wc -c)" -gt 1 ] && cw=2 || cw=1
+    [ $((w + cw)) -gt "$budget" ] && break
+    out+="$c"; w=$((w + cw))
+  done
+  printf '%s…' "$out"
+}
+
+# TUI_MIN_COLS / TUI_MIN_ROWS — 低於此尺寸就不畫 checkbox 選單
+# 欄：前綴 "❯ [x] " 佔 6 欄，名稱欄最長約 24，再留 10 欄給描述
+# 列：標題 2 列 + 清單 n 列 + 結果 2 列
+TUI_MIN_COLS=40
+TUI_ROWS_OVERHEAD=4
+
+# tui_capable <項目數> — 終端是否支援且放得下 checkbox 選單
+# I/O：輸入清單項目數；無輸出；回 0 表示可用
+# stderr 必須是終端：選單畫在 stderr，游標控制碼送到非終端只會變成亂碼
+# DECISION: 尺寸放不下就回 1 讓呼叫端退回編號輸入版，而不是硬畫——清單一旦折行或捲動，
+#           「上移 n 行重畫」的前提就不成立，畫面會逐輪錯位，比不畫更難用
+tui_capable() {
+  local n="${1:-0}" cols rows
+  [ -t 2 ] || return 1
+  case "${TERM:-}" in ''|dumb) return 1 ;; esac
+  have tput && tput cuu1 >/dev/null 2>&1 || return 1
+  cols="$(tput cols 2>/dev/null)" || return 1
+  rows="$(tput lines 2>/dev/null)" || return 1
+  [ "$cols" -ge "$TUI_MIN_COLS" ] || return 1
+  [ "$rows" -ge $((n + TUI_ROWS_OVERHEAD)) ] || return 1
+}
+
+# ── 通用 checkbox 選單 ────────────────────────────────────────────────
+# 兩個地方要挑東西（要處理哪些 agent、哪些 skill），形狀相同，故抽成同一組函式。
+# 呼叫端以 process substitution 餵入項目清單（不可用 pipeline——那會讓函式跑在
+# subshell 裡，寫不回全域 PICKED）：
+#     pick_list agent 安裝 agent_desc < <(printf '%s\n' $ALL_AGENTS)
+# 結果：PICKED＝空白分隔的選擇；PICKED_ALL＝1 表示全選（呼叫端可據此走「全部」的既有路徑）
+
+PICKED=""      # 選擇結果（空白分隔）
+PICKED_ALL=""  # 1 ＝使用者選了全部
+
+# pick_tui <名詞> <動詞> <描述函式> — 上下鍵移動、空白鍵勾選的 checkbox 選單
+# I/O：項目清單自 stdin（每行一個）；選單畫在 stderr；結果寫入 PICKED／PICKED_ALL
+#      回 0 ＝繼續；回 1 ＝使用者取消
+#
+# DECISION: 不引入 fzf／whiptail／dialog——本 repo 目前只依賴 jq 與 rsync，
+#           為了一個選單多一個必裝的外部程式並不划算；純 bash + tput 自足且行為可控。
+#           代價是要自己處理游標與重畫，故有 fit() 的截斷與 trap 的還原
+pick_tui() {
+  local noun="$1" verb="$2" descfn="$3"
+  local all=() lines=() n i cur=0 key rest cols namew descw
+  local up clr hide show bold dim rst
+  local -a mark
+
+  while IFS= read -r i; do [ -n "$i" ] && all+=("$i"); done
+  n=${#all[@]}; [ "$n" -gt 0 ] || return 0
+  for (( i=0; i<n; i++ )); do mark[i]=1; done   # 預設全選，最常見的意圖是「全部」
+
+  up="$(tput cuu1)"; clr="$(tput el)"; hide="$(tput civis)"; show="$(tput cnorm)"
+  bold="$(tput bold)"; dim="$(tput dim)"; rst="$(tput sgr0)"
+  cols="$(tput cols)"
+
+  # 名稱欄取最長名稱＋2，但不得吃掉描述的空間；前綴 "❯ [x] " 固定 6 欄
+  namew=0
+  for i in "${all[@]}"; do
+    [ "$(str_width "$i")" -gt "$namew" ] && namew="$(str_width "$i")"
+  done
+  namew=$((namew + 2))
+  [ "$namew" -gt $((cols - 16)) ] && namew=$((cols - 16))
+  descw=$((cols - namew - 6))
+
+  # DECISION: 每列只在進選單時算一次——fit() 逐字元呼叫 wc，放進 draw() 會讓每次
+  #           按鍵都重算 n×描述長度 次子行程，在慢終端上按鍵會明顯延遲
+  for (( i=0; i<n; i++ )); do
+    lines[i]="$(pad "$(fit "${all[i]}" "$namew")" "$namew")$(fit "$("$descfn" "${all[i]}")" "$descw")"
+  done
+
+  # 任何離開路徑都要還原游標，否則使用者的終端會一直看不到游標
+  tui_restore() { printf '%s' "$show" >&2; trap - INT TERM HUP; }
+  trap 'tui_restore; return 1' INT TERM HUP
+
+  draw() {
+    local i prefix box
+    for (( i=0; i<n; i++ )); do
+      [ "$i" = "$cur" ] && prefix="${bold}❯ ${rst}" || prefix="  "
+      [ "${mark[i]}" = 1 ] && box="${bold}[x]${rst}" || box="[ ]"
+      printf '%s%s %s %s\n' "$clr" "$prefix" "$box" "${lines[i]}" >&2
+    done
+  }
+
+  printf '\n要%s哪些 %s：%s↑↓ 移動．空白 勾選．a 全選／全不選．Enter 確認．q 取消%s\n\n' \
+         "$verb" "$noun" "$dim" "$rst" >&2
+  printf '%s' "$hide" >&2
+  draw
+
+  while :; do
+    IFS= read -rsn1 key < /dev/tty || key=q
+    # 方向鍵是 ESC [ A/B 三個位元組，需再讀兩個；單獨的 ESC 則當取消
+    if [ "$key" = $'\e' ]; then
+      read -rsn2 -t 0.05 rest < /dev/tty || rest=""
+      key="$key$rest"
+    fi
+    case "$key" in
+      $'\e[A'|k) cur=$(( (cur - 1 + n) % n )) ;;
+      $'\e[B'|j) cur=$(( (cur + 1) % n )) ;;
+      ' ')       [ "${mark[cur]}" = 1 ] && mark[cur]=0 || mark[cur]=1 ;;
+      a|A)       local any=0
+                 for (( i=0; i<n; i++ )); do [ "${mark[i]}" = 0 ] && any=1; done
+                 for (( i=0; i<n; i++ )); do mark[i]=$any; done ;;
+      ''|$'\n') break ;;
+      q|Q|$'\e') tui_restore; printf '→ 已取消\n' >&2; return 1 ;;
+      *)         continue ;;
+    esac
+    for (( i=0; i<n; i++ )); do printf '%s' "$up" >&2; done   # 回到清單頂端重畫
+    draw
+  done
+
+  tui_restore
+  pick_finish all[@] mark[@] "$n"
+}
+
+# pick_prompt <名詞> <動詞> <描述函式> — 編號輸入版（終端不支援游標定位時的退路）
+# I/O：與 pick_tui 相同
+pick_prompt() {
+  local noun="$1" verb="$2" descfn="$3"
+  local all=() n i sel picked=() idx
+  local -a mark
+
+  while IFS= read -r i; do [ -n "$i" ] && all+=("$i"); done
+  n=${#all[@]}; [ "$n" -gt 0 ] || return 0
+
+  {
+    printf '\n要%s哪些 %s：\n\n' "$verb" "$noun"
+    for (( i=0; i<n; i++ )); do
+      printf '  %d) ' "$((i+1))"; pad "${all[$i]}" 26; printf '%s\n' "$("$descfn" "${all[$i]}")"
+    done
+    printf '\n'
+  } >&2
+
+  while :; do
+    printf '請選擇（編號，空白或逗號分隔／a＝全部／q＝取消）[a]：' >&2
+    IFS= read -r sel < /dev/tty || sel=a
+    sel="${sel//,/ }"                       # 逗號與空白等價，使用者不必記格式
+    case "${sel:-a}" in
+      a|A|all)  for (( i=0; i<n; i++ )); do mark[i]=1; done
+                pick_finish all[@] mark[@] "$n"; return ;;
+      q|Q|quit) printf '→ 已取消\n' >&2; return 1 ;;
+    esac
+
+    picked=(); idx=ok
+    for (( i=0; i<n; i++ )); do mark[i]=0; done
+    for i in $sel; do
+      case "$i" in ''|*[!0-9]*) idx=bad; break ;; esac
+      [ "$i" -ge 1 ] && [ "$i" -le "$n" ] || { idx=bad; break; }
+      mark[$((i-1))]=1; picked+=(x)
+    done
+    if [ "$idx" = ok ] && [ "${#picked[@]}" -gt 0 ]; then
+      pick_finish all[@] mark[@] "$n"; return
+    fi
+    printf '  輸入無效，請輸入 1-%d 的編號、a 或 q\n' "$n" >&2
+  done
+}
+
+# pick_finish <項目陣列[@]> <勾選陣列[@]> <總數> — 把勾選結果收斂成 PICKED／PICKED_ALL
+# I/O：以陣列名稱展開傳入（bash 慣用法）；回 0 ＝有選；回 1 ＝一個都沒選（視同取消）
+pick_finish() {
+  local all=("${!1}") mark=("${!2}") n="$3" i out=()
+  for (( i=0; i<n; i++ )); do [ "${mark[i]}" = 1 ] && out+=("${all[i]}"); done
+  if [ "${#out[@]}" -eq 0 ]; then
+    printf '\n→ 一個都沒選，已取消\n' >&2; return 1
+  fi
+  PICKED="${out[*]}"
+  [ "${#out[@]}" = "$n" ] && PICKED_ALL=1 || PICKED_ALL=""
+  printf '\n→ %s\n\n' "$PICKED" >&2
+  return 0
+}
+
+# pick_list <名詞> <動詞> <描述函式> — 選單入口，依終端能力挑實作
+# I/O：項目清單自 stdin；結果寫入 PICKED／PICKED_ALL
+# DECISION: 終端不支援游標定位時退回編號輸入版，而不是直接放棄選擇能力——
+#           TERM=dumb、非 xterm 相容終端或無 tput 的精簡環境都還是能挑
+pick_list() {
+  local items n
+  items="$(cat)"; n="$(printf '%s\n' "$items" | grep -c .)"
+  # DECISION: 用 process substitution 而非 pipeline——pipeline 會讓被呼叫的函式跑在
+  #           subshell 裡，PICKED／PICKED_ALL 寫不回呼叫端，選擇結果會靜默遺失
+  if tui_capable "$n"; then
+    pick_tui   "$@" < <(printf '%s\n' "$items")
+  else
+    pick_prompt "$@" < <(printf '%s\n' "$items")
+  fi
+}
+
+# agent_desc <agent> — 選單裡顯示的 agent 說明（方式＋會動到哪裡）
+# I/O：輸入 agent 代號；輸出說明文字到 stdout
+agent_desc() {
+  local mode; mode="$(agent_mode "$1")" || return
+  if [ "$mode" = marketplace ]; then printf 'marketplace  %s' "$(agent_source "$1")"
+  else                               printf 'copy         %s' "$(agent_skills_dir "$1")"; fi
+}
+
+# pick_skills <動詞> — 互動選單入口，把使用者的選擇寫進全域 SKILLS
+# I/O：輸入顯示用動詞（安裝｜移除）；回 0 ＝繼續；回 1 ＝使用者取消
+#
+# DECISION: 只在「互動終端 ＋ 未指定 SKILLS ＋ 子命令為 install/remove」三者同時成立時才跳選單。
+#           少了 TTY 判斷，CI 或 `make install < /dev/null` 會停在 read 等一個永遠不會來的
+#           輸入；非互動情境一律沿用舊行為（全部），才不會把自動化流程弄壞。
+#           SKILLS 仍保留為覆寫途徑：指定了就直接照做，不再多問一次
+# DECISION: update 不跳選單——「把裝著的都更新到最新」本來就是它唯一合理的意圖，
+#           而未安裝者本就會被略過，多問一次只是徒增步驟
+# DECISION: 終端不支援游標定位時退回編號輸入版，而不是直接放棄選擇能力——
+#           TERM=dumb、非 xterm 相容終端或無 tput 的精簡環境都還是能挑
+pick_skills() {
+  pick_list skill "$1" skill_desc < <(repo_skills) || return 1
+  # 全選時清空 SKILLS，讓後續流程走「全部」的既有路徑
+  [ -n "$PICKED_ALL" ] && SKILLS="" || SKILLS="$PICKED"
+  return 0
+}
+
+# pick_agents <動詞> — 讓使用者挑要處理哪幾家 agent，結果寫進全域 TARGETS
+# I/O：輸入顯示用動詞；回 0 ＝繼續；回 1 ＝使用者取消
+pick_agents() {
+  pick_list agent "$1" agent_desc < <(printf '%s\n' $ALL_AGENTS) || return 1
+  TARGETS="$PICKED"
+  return 0
 }
 
 # agent_skills_dir <agent> — 取得該 agent 的使用者級 skills 目錄（copy 模式的安裝目的地）
@@ -212,32 +504,50 @@ agent_source() {
 # 或從別的來源裝的。各家都會同時載入 plugin 與自己的 skills 目錄，殘留即重複載入。
 # 故 install 前偵測並擋下，remove 一律兩邊都掃，status 只在真的有東西時才多印一列。
 
-# has_plugin <agent> — 該 agent 是否已用 plugin 機制裝了本 plugin
-# I/O：輸入 agent 代號；無輸出；回 0 表示已安裝
+# has_plugin <agent> <plugin> — 該 agent 是否已用 plugin 機制裝了指定的 plugin
+# I/O：輸入 agent 代號與 plugin 名稱；無輸出；回 0 表示已安裝
 has_plugin() {
-  case "$1" in
+  local agent="$1" plugin="$2"
+  case "$agent" in
     # claude 的 list 只列已安裝者，名稱命中即代表已安裝
     claude)
-      have claude && claude plugin list 2>/dev/null | grep -qF "$PLUGIN@$MARKETPLACE"
+      have claude && claude plugin list 2>/dev/null | grep -qF "$plugin@$MARKETPLACE"
       ;;
     # codex 的 list 會把「marketplace 已註冊但未安裝」的 plugin 一併列出，狀態欄為 not installed。
     # DECISION: 不可用 `grep installed` 判斷——"not installed" 含有 "installed" 子字串，
-    #           會把未安裝誤判為已安裝，進而錯誤擋下 copy 安裝。
-    #           改以 awk 取第一欄完全相符的那列，剝掉 PLUGIN 欄後要求狀態欄「以 installed 開頭」
+    #           會把未安裝誤判為已安裝。改以 awk 取第一欄完全相符的那列，
+    #           剝掉 PLUGIN 欄後要求狀態欄「以 installed 開頭」
     codex)
       have codex && codex plugin list 2>/dev/null \
-        | awk -v p="$PLUGIN@$MARKETPLACE" '$1==p { sub(/^[^ \t]+[ \t]+/, ""); print; exit }' \
+        | awk -v p="$plugin@$MARKETPLACE" '$1==p { sub(/^[^ \t]+[ \t]+/, ""); print; exit }' \
         | grep -q '^installed'
       ;;
     # agy 的 list 是 JSON；無 plugin 時輸出非 JSON 純文字，故 jq 需吞錯（不算命中）
     agy)
       have agy && agy plugin list 2>/dev/null \
-        | jq -e --arg n "$PLUGIN" '.imports[]? | select(.name==$n)' >/dev/null 2>&1
+        | jq -e --arg n "$plugin" '.imports[]? | select(.name==$n)' >/dev/null 2>&1
       ;;
     # opencode 無 plugin 機制，永遠視為未安裝（與未知代號同路徑，但理由不同故獨立列出）
     opencode) return 1 ;;
     *) return 1 ;;
   esac
+}
+
+# installed_legacy <agent> — 列出該 agent 上仍裝著的舊 plugin 名（已從 marketplace 移除者）
+# I/O：輸入 agent 代號；每行一個名稱到 stdout
+# codex 的 plugin list 看不到已移除的 entry，故改以 config.toml 的 [plugins."名稱@marketplace"] 判斷——
+# 那才是「執行期會不會載入」的依據；只信 plugin list 會漏掉這種隱形孤兒
+installed_legacy() {
+  local agent="$1" n cfg
+  [ -n "$LEGACY_PLUGINS" ] || return 0
+  cfg="${CODEX_HOME:-$HOME/.codex}/config.toml"
+  for n in $LEGACY_PLUGINS; do
+    case "$agent" in
+      claude) have claude && claude plugin list 2>/dev/null | grep -qF "$n@$MARKETPLACE" && printf '%s\n' "$n" ;;
+      codex)  have codex && [ -f "$cfg" ] && grep -qF "[plugins.\"$n@$MARKETPLACE\"]" "$cfg" && printf '%s\n' "$n" ;;
+    esac
+  done
+  return 0
 }
 
 # has_marketplace <agent> — 該 agent 是否已註冊本 marketplace
@@ -277,6 +587,19 @@ has_copy() {
   local dir
   dir="$(agent_skills_dir "$1")" || return 1
   dir_has_skills "$dir"
+}
+
+# agy_plugin_leftovers [agent] — agy 上以 plugin 機制裝著的本 repo skill
+# I/O：可選的 agent 代號（非 agy 時輸出空）；每行一個 plugin 名到 stdout
+# 佈局改為 plugins/<name>/ 後，agy 的 `plugin install ./plugins/<name>` 裝的就是單一 skill，
+# plugin 名等於 skill 名，故直接以 skill 名逐個判斷
+agy_plugin_leftovers() {
+  local agent="${1:-agy}" n
+  [ "$agent" = agy ] || return 0
+  while IFS= read -r n; do
+    has_plugin agy "$n" && printf '%s\n' "$n"
+  done < <(repo_skills)
+  return 0
 }
 
 # opencode_shared_dirs — opencode 除自己的目錄外，還會掃描哪些其他 agent 的 skills 目錄
@@ -330,16 +653,23 @@ opencode_shared_guard() {
 #      回 0 ＝可繼續；回 1 ＝呼叫端應中止該 agent
 # 殘留的來源不限本工具（舊版、手動複製、別處裝的都算），只要存在就會與本次安裝重複載入
 leftover_guard() {
-  local agent="$1" mode msg
+  local agent="$1" mode msg legacy
   mode="$(agent_mode "$agent")" || return 0
 
-  # 本次走 marketplace → 殘留是 skills 目錄裡的副本；本次走 copy → 殘留是 plugin 安裝
-  if [ "$mode" = marketplace ]; then
+  # 舊 plugin（已從 marketplace 移除但機器上還裝著）優先報——它一裝就是全部 skill，
+  # 與本次要裝的單一 skill 必然重疊，且 codex 上看不見，不主動講使用者不會知道
+  legacy="$(installed_legacy "$agent" | tr '\n' ' ')"
+  if [ -n "${legacy// /}" ]; then
+    msg="仍裝著已下架的 plugin：${legacy% }"
+  elif [ "$mode" = marketplace ]; then
+    # 本次走 marketplace → 殘留是 skills 目錄裡的副本
     has_copy "$agent" || return 0
     msg="$(agent_skills_dir "$agent") 已有本 repo 的 skill"
   else
-    has_plugin "$agent" || return 0
-    msg="已用 plugin 機制安裝（$PLUGIN）"
+    # 本次走 copy → 殘留是 plugin 安裝（agy 手動裝的整包）
+    local lp; lp="$(agy_plugin_leftovers | tr '\n' ' ')"
+    [ -n "${lp// /}" ] || return 0
+    msg="已用 plugin 機制安裝（${lp% }）"
   fi
 
   # FORCE 時仍執行，但必須留下警告——並存是有意識的選擇，不該事後看不出來
@@ -351,7 +681,7 @@ leftover_guard() {
   # 預設中止，並直接給出可執行的出路，免得使用者還要回頭查文件
   {
     printf '  ✗ %s：%s，中止以免重複載入\n' "$agent" "$msg"
-    printf '      remove 會把兩種機制一起清掉：tools/skills.sh remove %s\n' "$agent"
+    printf '      remove 會把殘留一起清掉：tools/skills.sh remove %s\n' "$agent"
     printf '      或確定要並存：FORCE=1 ...\n'
   } >&2
   FAILED=1
@@ -360,65 +690,78 @@ leftover_guard() {
 
 # ════════════════ marketplace 模式（claude／codex）════════════════
 # 兩家各一組 install/remove/update，由主流程以 marketplace_<agent>_<cmd> 動態呼叫。
-# 骨架相同（檢查 CLI → 遺留偵測 → 執行），差異只在各家 CLI 的子命令與參數形狀。
+# 骨架相同（檢查 CLI → 遺留偵測 → 逐 skill 執行），差異只在各家 CLI 的子命令與參數形狀。
+#
+# 每個 skill 是一個獨立的 plugin（plugin 名即 skill 名），故安裝／移除都要逐個處理。
 #
 # remove 一律先判斷有沒有裝再下指令：claude 與 codex 對「移除不存在的東西」都回非零，
-# 會被 run() 記成失敗，讓乾淨環境跑 remove 也回 rc=1。agy 則是冪等的，三家對齊到冪等。
+# 會被 run() 記成失敗，讓乾淨環境跑 remove 也回 rc=1。agy 則是冪等的，各家對齊到冪等。
 
-# marketplace_claude_install — 註冊 marketplace 後安裝 plugin
+# marketplace_claude_install — 註冊 marketplace 後逐一安裝選定的 skill
 # I/O：無參數（讀全域 SOURCE）；進度走 stdout；失敗累計至 FAILED
 marketplace_claude_install() {
+  local p
   skip_missing claude claude && return
   leftover_guard claude || return
   run "claude：註冊 marketplace $MARKETPLACE" claude plugin marketplace add "$SOURCE"
-  run "claude：安裝 $PLUGIN@$MARKETPLACE"     claude plugin install "$PLUGIN@$MARKETPLACE"
+  while IFS= read -r p; do
+    run "claude：安裝 $p" claude plugin install "$p@$MARKETPLACE"
+  done < <(target_skills)
 }
 
-# marketplace_claude_remove — 移除 plugin 並註銷 marketplace
-# DECISION: 連 marketplace 一起註銷——這個 marketplace 只為本 plugin 存在，
-#           留著是殘留設定，且會讓下次 status 顯示不一致
+# marketplace_claude_remove — 移除選定的 plugin；全部移除時連 marketplace 一起註銷
+# DECISION: 只有在「這個 marketplace 已無任何本 repo 的 plugin」時才註銷——
+#           選裝其中幾個時註銷會把其餘還裝著的 plugin 一起弄失效
 marketplace_claude_remove() {
+  local p
   skip_missing claude claude && return
-  if has_plugin claude; then
-    run "claude：移除 $PLUGIN" claude plugin uninstall "$PLUGIN@$MARKETPLACE"
-  else
-    printf '  [略過] claude：%s 未安裝\n' "$PLUGIN"
-  fi
-  if has_marketplace claude; then
-    run "claude：移除 marketplace" claude plugin marketplace remove "$MARKETPLACE"
-  else
-    printf '  [略過] claude：marketplace %s 未註冊\n' "$MARKETPLACE"
-  fi
+  while IFS= read -r p; do
+    if has_plugin claude "$p"; then
+      run "claude：移除 $p" claude plugin uninstall "$p@$MARKETPLACE"
+    else
+      printf '  [略過] claude：%s 未安裝\n' "$p"
+    fi
+  done < <(target_skills)
+  marketplace_cleanup claude
 }
 
-# marketplace_claude_update — 先刷新 marketplace 快照，再更新 plugin
+# marketplace_claude_update — 先刷新 marketplace 快照，再逐一更新
 # 兩步不可省其一：只更新 plugin 會拿到舊快照裡的版本
 marketplace_claude_update() {
+  local p
   skip_missing claude claude && return
   run "claude：更新 marketplace 快照" claude plugin marketplace update "$MARKETPLACE"
-  run "claude：更新 $PLUGIN"          claude plugin update "$PLUGIN@$MARKETPLACE"
+  while IFS= read -r p; do
+    if has_plugin claude "$p"; then
+      run "claude：更新 $p" claude plugin update "$p@$MARKETPLACE"
+    else
+      printf '  [略過] claude：%s 未安裝\n' "$p"
+    fi
+  done < <(target_skills)
 }
 
 # marketplace_codex_install — 與 claude 同流程，差別在安裝子命令是 add 而非 install
 marketplace_codex_install() {
+  local p
   skip_missing codex codex && return
   leftover_guard codex || return
   run "codex：註冊 marketplace $MARKETPLACE" codex plugin marketplace add "$SOURCE"
-  run "codex：安裝 $PLUGIN@$MARKETPLACE"     codex plugin add "$PLUGIN@$MARKETPLACE"
+  while IFS= read -r p; do
+    run "codex：安裝 $p" codex plugin add "$p@$MARKETPLACE"
+  done < <(target_skills)
 }
 
 marketplace_codex_remove() {
+  local p
   skip_missing codex codex && return
-  if has_plugin codex; then
-    run "codex：移除 $PLUGIN" codex plugin remove "$PLUGIN@$MARKETPLACE"
-  else
-    printf '  [略過] codex：%s 未安裝\n' "$PLUGIN"
-  fi
-  if has_marketplace codex; then
-    run "codex：移除 marketplace" codex plugin marketplace remove "$MARKETPLACE"
-  else
-    printf '  [略過] codex：marketplace %s 未註冊\n' "$MARKETPLACE"
-  fi
+  while IFS= read -r p; do
+    if has_plugin codex "$p"; then
+      run "codex：移除 $p" codex plugin remove "$p@$MARKETPLACE"
+    else
+      printf '  [略過] codex：%s 未安裝\n' "$p"
+    fi
+  done < <(target_skills)
+  marketplace_cleanup codex
 }
 
 # codex_marketplace_is_git — codex 目前註冊的這個 marketplace 是否為 Git 來源
@@ -439,18 +782,54 @@ marketplace_codex_update() {
   # 本機來源讀的就是工作目錄現況、沒有快照要刷新，硬呼叫 upgrade 只會換來一個誤報的失敗
   if codex_marketplace_is_git; then
     run "codex：刷新 marketplace 快照" codex plugin marketplace upgrade "$MARKETPLACE"
-  elif has_plugin codex; then
+  elif has_marketplace codex; then
     printf '  [略過] codex：marketplace 註冊為本機來源，無快照需刷新（內容即時反映 repo）\n'
   else
-    # 未註冊時 sourceType 同樣取不到值，但原因不同，訊息不可混為一談
     printf '  [略過] codex：尚未註冊 marketplace %s，無可更新的內容\n' "$MARKETPLACE"
   fi
+}
+
+# marketplace_cleanup <agent> — 本 repo 的 plugin 全數移除後，把 marketplace 一起註銷
+# I/O：輸入 agent 代號；有動作才印進度
+# 這個 marketplace 只為本 repo 的 plugin 存在，一個都不剩時留著是殘留設定
+# DECISION: 註銷前也要確認沒有已下架的舊 plugin 還裝著——實測 `claude plugin marketplace
+#           remove` 會連帶移除該 marketplace 底下已安裝的 plugin，若此時還有舊 bundle，
+#           就會在使用者沒要求的情況下把它一起清掉（選了部分 skill 時尤其不該發生）
+marketplace_cleanup() {
+  local agent="$1" p
+  if [ -n "$(installed_legacy "$agent")" ]; then
+    printf '  [略過] %s：仍有已下架的 plugin 裝著，保留 marketplace %s 註冊\n' "$agent" "$MARKETPLACE"
+    return
+  fi
+  while IFS= read -r p; do
+    has_plugin "$agent" "$p" && return   # 還有裝著的，不能註銷
+  done < <(printf '%s\n' $MP_PLUGINS)
+  if has_marketplace "$agent"; then
+    run "$agent：移除 marketplace" "$agent" plugin marketplace remove "$MARKETPLACE"
+  else
+    printf '  [略過] %s：marketplace %s 未註冊\n' "$agent" "$MARKETPLACE"
+  fi
+}
+
+# legacy_remove <agent> — 清掉已從 marketplace 下架、但機器上還裝著的舊 plugin
+# I/O：輸入 agent 代號；有東西才印進度
+# codex 的 plugin list 看不到它，但 `plugin remove` 仍可正常移除（實測會清掉 config.toml 與快取）
+legacy_remove() {
+  local agent="$1" n
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    case "$agent" in
+      claude) run "claude：移除已下架的 $n" claude plugin uninstall "$n@$MARKETPLACE" ;;
+      codex)  run "codex：移除已下架的 $n"  codex plugin remove "$n@$MARKETPLACE" ;;
+    esac
+  done < <(installed_legacy "$agent")
 }
 
 # leftover_remove <agent> — 清掉該 agent「非本工具所用機制」的殘留
 # I/O：輸入 agent 代號；有東西才印進度，沒有則完全靜默
 # remove 一律呼叫此函式：每個 agent 雖只走一種方式，但另一種機制的殘留同樣會被載入，
 # 只清自己那一邊等於留著重複載入的來源
+# 註：已下架的舊 plugin 由 legacy_remove 另外處理，且必須在註銷 marketplace 之前執行
 leftover_remove() {
   local agent="$1" mode
   mode="$(agent_mode "$agent")" || return
@@ -458,17 +837,20 @@ leftover_remove() {
   if [ "$mode" = marketplace ]; then
     # marketplace 模式的 agent：殘留是 skills 目錄裡的副本
     has_copy "$agent" && copy_remove "$agent"
-  elif [ "$agent" = agy ] && has_plugin agy; then
+  elif [ "$agent" = agy ]; then
     # copy 模式的 agent：殘留是 plugin 安裝。只有 agy 可能有——opencode 沒有 plugin 機制
     # agy 的 uninstall 本身即冪等，但仍先判斷，避免對沒裝的情況印出無意義的進度列
-    run "agy：移除殘留的 plugin $PLUGIN" agy plugin uninstall "$PLUGIN"
+    local n
+    while IFS= read -r n; do
+      [ -n "$n" ] && run "agy：移除殘留的 plugin $n" agy plugin uninstall "$n"
+    done < <(agy_plugin_leftovers agy)
   fi
 }
 
 # ════════════════ copy 模式 ════════════════
 # 三家共用同一套邏輯，唯一差異是目的地（agent_skills_dir），故不需要 per-agent 函式。
 
-# copy_install <agent> — 把 repo 的每個 skill 同步進該 agent 的 skills 目錄
+# copy_install <agent> — 把選定的 skill 同步進該 agent 的 skills 目錄（SKILLS 未設＝全部）
 # I/O：輸入 agent 代號；每個 skill 一行進度到 stdout；失敗累計至 FAILED
 # DECISION: 用 rsync -a --delete 而非 cp -r——rsync 會把目的地多出來的舊檔一併刪除，
 #           重跑即得到與 repo 完全一致的狀態；cp -r 會留下 repo 已刪除的殘檔
@@ -496,13 +878,13 @@ copy_install() {
       FAILED=1; continue
     fi
 
-    run "$agent：$s → $dir" rsync -a --delete "$REPO_ROOT/skills/$s/" "$target/"
-  done < <(repo_skills)
+    run "$agent：$s → $dir" rsync -a --delete "$(skill_dir "$s")/" "$target/"
+  done < <(target_skills)
 }
 
 # copy_remove <agent> — 移除該 agent skills 目錄下屬於本 repo 的項目
 # I/O：輸入 agent 代號；每個移除項一行進度到 stdout；失敗累計至 FAILED
-# DECISION: 只走訪 repo_skills 的名稱、不掃目的地目錄——使用者可能另有第三方 skill 裝在同一處，
+# DECISION: 只走訪本 repo 的 skill 名稱、不掃目的地目錄——使用者可能另有第三方 skill 裝在同一處，
 #           以目的地為基準列舉會把它們一併刪掉
 copy_remove() {
   local agent="$1" dir s target
@@ -525,7 +907,7 @@ copy_remove() {
     elif [ -d "$target" ]; then
       run "$agent：移除 $s" rm -rf "$target"
     fi
-  done < <(repo_skills)
+  done < <(target_skills)
 }
 
 # copy_update <agent> — 與 install 同義：rsync --delete 本身即是「同步到最新」
@@ -551,30 +933,36 @@ copy_state() {
   [ -d "$p" ] || { printf -- '-'; return; }
 
   # 實體副本：與 repo 逐檔比對，區分「一致」與「已飄移」
-  if diff -rq "$REPO_ROOT/skills/$s" "$p" >/dev/null 2>&1; then printf '✓一致'; else printf '≠有差異'; fi
+  if diff -rq "$(skill_dir "$s")" "$p" >/dev/null 2>&1; then printf '✓一致'; else printf '≠有差異'; fi
 }
 
-# marketplace_detail <agent> — marketplace 模式下「已安裝」那列的細節欄
-# I/O：輸入 agent 代號；輸出一段說明文字到 stdout
+# marketplace_state <agent> <plugin> — 單一 plugin 在該 agent 的安裝狀態
+# I/O：輸入 agent 代號與 plugin 名；輸出狀態碼到 stdout（不含換行）
+#      `-`＝未安裝；claude 回版本字串、codex 回其狀態欄
 # 兩家 list 的輸出形狀不同（縮排區塊／表格），各自解析
-marketplace_detail() {
-  case "$1" in
+marketplace_state() {
+  local agent="$1" plugin="$2"
+  has_plugin "$agent" "$plugin" || { printf -- '-'; return; }
+  case "$agent" in
     # claude：名稱那列之後 3 行內有 `Version: <值>`
-    claude) printf 'version=%s' "$(claude plugin list 2>/dev/null \
-              | grep -A3 -F "$PLUGIN@$MARKETPLACE" | awk -F': ' '/Version:/{print $2; exit}')" ;;
+    claude) printf '%s' "$(claude plugin list 2>/dev/null \
+              | grep -A3 -F "$plugin@$MARKETPLACE" | awk -F': ' '/Version:/{print $2; exit}')" ;;
     # codex：表格列，剝掉 PLUGIN 欄後取到下一組連續空白為止，即狀態欄
-    codex)  codex plugin list 2>/dev/null | grep -F "$PLUGIN@$MARKETPLACE" \
+    codex)  codex plugin list 2>/dev/null | grep -F "$plugin@$MARKETPLACE" \
               | head -1 | sed -E 's/^\S+\s+//; s/\s{2,}.*$//' | tr -d '\n' ;;
   esac
 }
 
-# copy_detail <agent> — copy 模式下逐 skill 的狀態字串
+# agent_detail <agent> — 該 agent 逐 skill 的狀態字串
 # I/O：輸入 agent 代號；輸出「<skill>=<狀態> ...」到 stdout；一個都沒裝時輸出空字串
-copy_detail() {
-  local dir s state out=""
-  dir="$(agent_skills_dir "$1")" || return
+# marketplace 與 copy 兩種模式在此收斂成同一種呈現：都是「哪些 skill 裝了、各自什麼狀態」
+agent_detail() {
+  local agent="$1" mode dir s state out=""
+  mode="$(agent_mode "$agent")" || return
+  dir="$(agent_skills_dir "$agent")"
   while IFS= read -r s; do
-    state="$(copy_state "$dir" "$s")"
+    if [ "$mode" = marketplace ]; then state="$(marketplace_state "$agent" "$s")"
+    else                                state="$(copy_state "$dir" "$s")"; fi
     [ "$state" = "-" ] || out+="$s=$state "
   done < <(repo_skills)
   printf '%s' "$out"
@@ -585,33 +973,32 @@ copy_detail() {
 # DECISION: 只印該 agent 實際使用的那一種方式——每個 agent 只走一種，另一種永遠是「未安裝」，
 #           印出來只是固定的雜訊。但另一種機制若真的留有東西就會重複載入，
 #           故改為「有東西才多印一列」：正常情況乾淨，出問題時看得見
+# DECISION: 逐 skill 列出而非只報 plugin 名——每個 skill 各自是一個 plugin，
+#           使用者可以只裝其中幾個，一個整體的「已安裝／未安裝」表達不了實際狀態
 agent_status() {
-  local agent="$1" mode detail
+  local agent="$1" mode detail legacy
   skip_missing "$agent" "$agent" && return
   mode="$(agent_mode "$agent")" || return
 
-  # 該 agent 自己的方式：一律印，未安裝時細節欄給出「會裝到哪」
-  if [ "$mode" = marketplace ]; then
-    if has_plugin "$agent"; then
-      report "$agent" marketplace 已安裝 "$(marketplace_detail "$agent")"
-    else
-      report "$agent" marketplace 未安裝 "$(agent_source "$agent")"
-    fi
+  detail="$(agent_detail "$agent")"
+  if [ -n "$detail" ]; then
+    report "$agent" "$mode" 已安裝 "$detail"
   else
-    detail="$(copy_detail "$agent")"
-    if [ -n "$detail" ]; then
-      report "$agent" copy 已安裝 "$detail"
-    else
-      report "$agent" copy 未安裝 "$(agent_skills_dir "$agent")"
-    fi
+    if [ "$mode" = marketplace ]; then report "$agent" "$mode" 未安裝 "$(agent_source "$agent")"
+    else                               report "$agent" "$mode" 未安裝 "$(agent_skills_dir "$agent")"; fi
   fi
+
+  # 已下架但仍裝著的舊 plugin：一裝就是全部 skill，且 codex 上完全看不見
+  legacy="$(installed_legacy "$agent" | tr '\n' ' ')"
+  [ -n "${legacy// /}" ] && report "$agent" 已下架 ⚠遺留 "${legacy% }：仍會載入全部 skill，建議移除"
 
   # 另一種機制的殘留：只在真的有東西時才現身
   if [ "$mode" = marketplace ]; then
     detail="$(copy_detail "$agent")"
     [ -n "$detail" ] && report "$agent" copy ⚠遺留 "$(agent_skills_dir "$agent")：$detail"
-  elif has_plugin "$agent"; then
-    report "$agent" plugin ⚠遺留 "已用 plugin 機制安裝，會與 copy 重複載入"
+  else
+    local lp; lp="$(agy_plugin_leftovers "$agent" | tr '\n' ' ')"
+    [ -n "${lp// /}" ] && report "$agent" plugin ⚠遺留 "已用 plugin 機制安裝（${lp% }），會與 copy 重複載入"
   fi
 
   # opencode 另列它從別處掃到的來源——只看自己的目錄會誤判為「沒裝」，
@@ -621,6 +1008,18 @@ agent_status() {
       dir_has_skills "$detail" && report "$agent" 共用 已掃到 "$detail"
     done < <(opencode_shared_dirs)
   fi
+}
+
+# copy_detail <agent> — copy 目錄逐 skill 的狀態字串（供 marketplace 模式的殘留列使用）
+# I/O：輸入 agent 代號；輸出「<skill>=<狀態> ...」到 stdout
+copy_detail() {
+  local dir s state out=""
+  dir="$(agent_skills_dir "$1")" || return
+  while IFS= read -r s; do
+    state="$(copy_state "$dir" "$s")"
+    [ "$state" = "-" ] || out+="$s=$state "
+  done < <(repo_skills)
+  printf '%s' "$out"
 }
 
 # ════════════════ validate ════════════════
@@ -636,29 +1035,51 @@ do_validate() {
     printf '  ✗ marketplace.json 缺必要欄位\n' >&2; FAILED=1
   fi
 
-  # 根目錄 plugin.json：agy 的 plugin manifest，位置與 .claude-plugin/ 不同。
-  # 本工具對 agy 走 copy，用不到這份；但它讓使用者仍可自行 `agy plugin install <目錄>`，
-  # 故保留並檢查。缺了不影響本工具的任何流程，因此只警告、不計失敗
-  if [ -f "$REPO_ROOT/plugin.json" ] && jq -e '.name' "$REPO_ROOT/plugin.json" >/dev/null 2>&1; then
-    printf '  ✔ plugin.json（供手動 agy plugin install 用）存在且合法\n'
-  else
-    printf '  [警告] 缺 root plugin.json：本工具不受影響（agy 走 copy），但手動 agy plugin install 會失敗\n' >&2
-  fi
-
-  # skills/：每個子目錄都該有 SKILL.md，缺了會被各家掃描靜默略過而「少裝一個」
-  local d n=0
-  for d in "$REPO_ROOT"/skills/*/; do
+  # 佈局不變式：plugins/<name>/skills/<name>/SKILL.md
+  # DECISION: 直接走訪 plugins/*/ 而非用 repo_skills——後者的職責是「列出有效 skill」，
+  #           會刻意略過不合格的目錄，正好把要回報的問題藏起來
+  local d n bad_layout=0
+  for d in "$REPO_ROOT"/plugins/*/; do
     [ -d "$d" ] || continue
-    if [ -f "${d}SKILL.md" ]; then n=$((n+1)); else
-      printf '  ✗ %s 缺 SKILL.md\n' "$(basename "$d")" >&2; FAILED=1
+    n="$(basename "$d")"
+    if [ ! -f "$d/skills/$n/SKILL.md" ]; then
+      printf '  ✗ plugins/%s 缺 skills/%s/SKILL.md，不會被任何 agent 掃描到\n' "$n" "$n" >&2
+      bad_layout=1; FAILED=1
     fi
+    # agy 靠每個 plugin 目錄自己的 plugin.json 才能單獨安裝，缺了只影響 agy
+    [ -f "$d/plugin.json" ] || printf '  [警告] plugins/%s 缺 plugin.json：agy 無法單獨安裝這個 skill\n' "$n" >&2
   done
-  printf '  ✔ skills/ 下有 %d 個有效 skill\n' "$n"
+  [ "$bad_layout" = 0 ] && printf '  ✔ 每個 plugins/<name>/ 都有 skills/<name>/SKILL.md\n'
+
+  # entry 的 source 必須指向存在的 plugin 目錄
+  local bad_src=0 e sp
+  while IFS=$'\t' read -r e sp; do
+    [ -n "$sp" ] || continue
+    [ -d "$REPO_ROOT/${sp#./}" ] || { printf '  ✗ %s 的 source 不存在：%s\n' "$e" "$sp" >&2; bad_src=1; FAILED=1; }
+  done < <(jq -r '.plugins[] | select(.source|type=="string") | [.name, .source] | @tsv' "$MANIFEST")
+  [ "$bad_src" = 0 ] && printf '  ✔ 所有 entry 的 source 都指向存在的目錄\n'
+
+  # 每個 skill 都要有對應的 entry，否則新增了卻沒發佈，使用者裝不到
+  local missing="" sk
+  while IFS= read -r sk; do
+    jq -e --arg n "$sk" 'any(.plugins[]; .name==$n)' "$MANIFEST" >/dev/null 2>&1 || missing+="$sk "
+  done < <(repo_skills)
+  if [ -z "$missing" ]; then
+    printf '  ✔ 每個 skill 都有對應的 marketplace entry\n'
+  else
+    printf '  ✗ 這些 skill 沒有 marketplace entry，使用者裝不到：%s\n' "${missing% }" >&2; FAILED=1
+  fi
 
   # 各家自己的驗證器：權威性高於上面的欄位檢查，有裝就跑
   # （codex 沒有對應的 validate 子命令，故只有兩家）
-  have claude && run "claude plugin validate" claude plugin validate "$REPO_ROOT"
-  have agy    && run "agy plugin validate"    agy plugin validate "$REPO_ROOT"
+  # --strict 把「無法辨識的欄位」也視為錯誤，可攔下拼錯的欄位名（實測本 repo 通過）
+  have claude && run "claude plugin validate --strict" claude plugin validate "$REPO_ROOT" --strict
+  # agy 驗的是單一 plugin 目錄（它只認該目錄的 plugin.json），故逐個跑
+  if have agy; then
+    while IFS= read -r sk; do
+      run "agy plugin validate（$sk）" agy plugin validate "$(plugin_dir "$sk")"
+    done < <(repo_skills)
+  fi
 }
 
 # ════════════════ 主流程 ════════════════
@@ -674,20 +1095,26 @@ case "$CMD" in
 
   agent   claude | codex | agy | opencode（可多個；省略＝全部）
 
-各 agent 的安裝方式是固定的，沒有選項：
+每個 skill 各自是一個 plugin，可單獨安裝。安裝方式則是 per-agent 固定的：
   claude    marketplace  ${GITHUB_SOURCE:-$REPO_ROOT}
   codex     marketplace  ${GITHUB_SOURCE:-$REPO_ROOT}
   agy       copy         $HOME/.gemini/skills
   opencode  copy         ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills
 
+  SKILLS  只處理指定的 skill（空白分隔）；不設＝互動選單（非互動時＝全部）
+          可用：$(repo_skills | tr '\n' ' ')
   SOURCE  覆寫 marketplace 來源；開發時裝工作目錄的內容用 SOURCE=\$PWD
   FORCE   1 ＝略過「另一種機制留有殘留」的偵測
 
+install 與 remove 在互動終端會先跳選單讓你挑；非互動（CI、pipe）一律視為全部。
+
 範例：
-  tools/skills.sh install                      # 四家一次裝對
-  tools/skills.sh status
-  SOURCE=\$PWD tools/skills.sh install          # 開發時改裝工作目錄的內容
-  tools/skills.sh remove agy                   # 單一 agent（remove 會連殘留一起清）
+  tools/skills.sh install                                    # 四家，跳選單挑 skill
+  tools/skills.sh install claude                             # 只處理 claude
+  SKILLS="mh-code-review" tools/skills.sh install            # 只裝一個 skill
+  SKILLS="mh-code-review mh-humanizer-zh-tw" tools/skills.sh install claude
+  SOURCE=\$PWD tools/skills.sh install                       # 開發時裝工作目錄的內容
+  tools/skills.sh status                                     # 逐 skill 的現況
 EOF
     exit 0 ;;
   *) echo "錯誤：未知子命令「$CMD」（可用：install/remove/update/status/validate）" >&2; exit 2 ;;
@@ -696,6 +1123,14 @@ esac
 # ── 決定目標 agent：省略＝全部；指定則先驗證代號，避免拼錯被靜默忽略成「什麼都沒做」 ──
 # EXPLICIT_TARGETS 供守衛區分「使用者點名這個 agent」與「它只是被全體掃到」，
 # 兩者該不該算失敗不同（見 opencode_shared_guard）
+# SKILLS 名稱驗證：拼錯若放行會靜默少裝一個，比照未知 agent 當場擋下
+for sk in $SKILLS; do
+  case "$(printf '%s\n' $(repo_skills) | tr '\n' ' ')" in
+    *" $sk "*|"$sk "*|*" $sk") ;;
+    *) echo "錯誤：未知 skill「$sk」（可用：$(repo_skills | tr '\n' ' ')）" >&2; exit 2 ;;
+  esac
+done
+
 [ "$#" -gt 0 ] && EXPLICIT_TARGETS=1 || EXPLICIT_TARGETS=""
 TARGETS="${*:-$ALL_AGENTS}"
 for a in $TARGETS; do
@@ -713,6 +1148,21 @@ if [ "$CMD" = status ]; then
   exit "$FAILED"
 fi
 
+# ── 互動選單：先挑 agent，再挑 skill ──
+# 條件缺一即沿用「全部」，確保非互動情境（CI、pipe、< /dev/null）不會停在等輸入。
+# 已在命令列點名 agent（如 make install-claude）時跳過 agent 那段，與 SKILLS 的邏輯一致。
+# DECISION: update 兩段都不跳——「把裝著的都更新到最新」本來就是它唯一合理的意圖，
+#           未安裝者本就會被略過，多問只是徒增步驟
+if [ -t 0 ] && [ -r /dev/tty ]; then
+  case "$CMD" in
+    install|remove)
+      verb=安裝; [ "$CMD" = remove ] && verb=移除
+      [ -z "$EXPLICIT_TARGETS" ] && { pick_agents "$verb" || exit 0; }
+      [ -z "$SKILLS" ]           && { pick_skills "$verb" || exit 0; }
+      ;;
+  esac
+fi
+
 # ── install / remove / update ──
 # DECISION: 先印「計畫」再執行——方式與來源逐 agent 不同，單一行標頭必然對其中幾家是錯的。
 #           把解析結果攤開，使用者在動手前就能確認每家各自會用什麼方式、動到哪裡
@@ -726,6 +1176,22 @@ done
 
 for a in $TARGETS; do
   mode="$(agent_mode "$a")"
+  # DECISION: 已下架的舊 plugin 必須在模式移除之前清——marketplace_*_remove 末端會在
+  #           「本 repo 的 plugin 全數移除」時註銷 marketplace，一旦註銷，
+  #           claude plugin list 就查不到那個舊 plugin，legacy 偵測會靜默失效
+  # DECISION: 只在「處理全部 skill」時才清舊 plugin——舊的是含全部 skill 的整包，
+  #           無法只從中拿掉一個。選了部分 skill 卻連帶把整包移除，等於在使用者
+  #           沒要求的情況下擴大移除範圍；改為提示並保留，由使用者自行決定
+  if [ "$CMD" = remove ]; then
+    if [ -z "$SKILLS" ]; then
+      legacy_remove "$a"
+    elif [ -n "$(installed_legacy "$a")" ]; then
+      printf '  [略過] %s：仍裝著已下架的 %s（含全部 skill，無法只移除其中一個）\n' \
+             "$a" "$(installed_legacy "$a" | tr '\n' ' ')" >&2
+      printf '        要清掉它請不指定 SKILLS 執行一次：tools/skills.sh remove %s\n' "$a" >&2
+    fi
+  fi
+
   if [ "$mode" = marketplace ]; then
     # marketplace 模式每個 agent 各有實作，CLI 存在與否由各函式自行檢查
     SOURCE="$(agent_source "$a")"

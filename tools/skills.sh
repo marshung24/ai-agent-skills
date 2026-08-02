@@ -544,7 +544,7 @@ matrix_agents() {
 pick_matrix() {
   local verb="$1"
   local rows=() cols=() nr nc r c i cur_r=0 cur_c=0 key rest
-  local namew colw=() total btn=0 on_btn=0
+  local namew colw=() total
   local up clr hide show bold dim rev rst
   local -A init
 
@@ -578,23 +578,21 @@ pick_matrix() {
     for (( c=0; c<nc; c++ )); do printf '%s%s%s' "$dim" "$(pad "${cols[c]}" "${colw[c]}")" "$rst" >&2; done
     printf '\n' >&2
     for (( r=0; r<nr; r++ )); do
-      [ "$r" = "$cur_r" ] && [ "$on_btn" = 0 ] && line="${bold}❯ ${rst}" || line="  "
+      [ "$r" = "$cur_r" ] && line="${bold}❯ ${rst}" || line="  "
       line+="$(pad "${rows[r]}" "$namew")"
       for (( c=0; c<nc; c++ )); do
         [ "${TGT[${cols[c]},${rows[r]}]}" = 1 ] && box="[x]" || box="[ ]"
         [ "${CUR[${cols[c]},${rows[r]}]:-}" = 1 ] && box="${bold}${box}${rst}" || box="${dim}${box}${rst}"
-        [ "$r" = "$cur_r" ] && [ "$c" = "$cur_c" ] && [ "$on_btn" = 0 ] && box="${rev}${box}${rst}"
+        [ "$r" = "$cur_r" ] && [ "$c" = "$cur_c" ] && box="${rev}${box}${rst}"
         line+="$(printf '%s%*s' "$box" $(( colw[c] - 3 )) '')"
       done
       printf '%s%s\n' "$clr" "$line" >&2
     done
     printf '%s\n' "$clr" >&2
-    line="$(printf '%*s' $((2 + namew)) '')"
-    for i in 0 1 2; do
-      case $i in 0) box=" 還原 ";; 1) box=" 取消 ";; 2) box=" 確定 ";; esac
-      [ "$on_btn" = 1 ] && [ "$btn" = "$i" ] && line+="${rev}[${box}]${rst}  " || line+="[${box}]  "
-    done
-    printf '%s%s\n' "$clr" "$line" >&2
+    # 三個動作固定以按鍵觸發，不做成可移動的焦點——焦點只用來指「哪一格」，
+    # 讓方向鍵的意義單一，不必在格子與按鈕之間切換模式
+    printf '%s%s%s[u 還原]  [Esc 取消]  [Enter 確定]%s\n' \
+           "$clr" "$(printf '%*s' $((2 + namew)) '')" "$dim" "$rst" >&2
   }
 
   # scope_toggle <範圍> — a/r/c 共用：範圍內有任一未勾就全勾，否則全不勾
@@ -614,7 +612,7 @@ pick_matrix() {
     done; done
   }
 
-  printf '\n要%s哪些（%s粗體＝目前已裝%s）\n%s↑↓←→ 移動．空白 切換．a 全部／r 整列／c 整欄．Enter 確定．q 取消%s\n\n' \
+  printf '\n要%s哪些（%s粗體＝目前已裝%s）\n%s↑↓←→ 移動．空白 切換該格．a 全部／r 整列／c 整欄%s\n\n' \
          "$verb" "$dim" "$rst" "$dim" "$rst" >&2
   printf '%s' "$hide" >&2
   draw
@@ -626,32 +624,18 @@ pick_matrix() {
       key="$key$rest"
     fi
     case "$key" in
-      $'\e[A'|k) if [ "$on_btn" = 1 ]; then on_btn=0; cur_r=$((nr-1)); else
-                   [ "$cur_r" = 0 ] && on_btn=1 || cur_r=$((cur_r-1)); fi ;;
-      $'\e[B'|j) if [ "$on_btn" = 1 ]; then on_btn=0; cur_r=0; else
-                   [ "$cur_r" = $((nr-1)) ] && on_btn=1 || cur_r=$((cur_r+1)); fi ;;
-      $'\e[D'|h) if [ "$on_btn" = 1 ]; then btn=$(( (btn+2) % 3 )); else cur_c=$(( (cur_c-1+nc) % nc )); fi ;;
-      $'\e[C'|l) if [ "$on_btn" = 1 ]; then btn=$(( (btn+1) % 3 )); else cur_c=$(( (cur_c+1) % nc )); fi ;;
-      ' ')       if [ "$on_btn" = 1 ]; then
-                   case "$btn" in
-                     0) for i in "${!init[@]}"; do TGT["$i"]="${init[$i]}"; done ;;
-                     1) tui_restore; printf '→ 已取消\n' >&2; return 1 ;;
-                     2) break ;;
-                   esac
-                 else
-                   [ "${TGT[${cols[cur_c]},${rows[cur_r]}]}" = 1 ] \
-                     && TGT["${cols[cur_c]},${rows[cur_r]}"]=0 || TGT["${cols[cur_c]},${rows[cur_r]}"]=1
-                 fi ;;
+      $'\e[A'|k) cur_r=$(( (cur_r - 1 + nr) % nr )) ;;
+      $'\e[B'|j) cur_r=$(( (cur_r + 1) % nr )) ;;
+      $'\e[D'|h) cur_c=$(( (cur_c - 1 + nc) % nc )) ;;
+      $'\e[C'|l) cur_c=$(( (cur_c + 1) % nc )) ;;
+      # 空白只做一件事：切換游標所在的那一格
+      ' ')       [ "${TGT[${cols[cur_c]},${rows[cur_r]}]}" = 1 ] \
+                   && TGT["${cols[cur_c]},${rows[cur_r]}"]=0 || TGT["${cols[cur_c]},${rows[cur_r]}"]=1 ;;
       a|A)       scope_toggle all ;;
       r|R)       scope_toggle row ;;
       c|C)       scope_toggle col ;;
-      ''|$'\n')  if [ "$on_btn" = 1 ]; then
-                   case "$btn" in
-                     0) for i in "${!init[@]}"; do TGT["$i"]="${init[$i]}"; done ;;
-                     1) tui_restore; printf '→ 已取消\n' >&2; return 1 ;;
-                     2) break ;;
-                   esac
-                 else break; fi ;;
+      u|U)       for i in "${!init[@]}"; do TGT["$i"]="${init[$i]}"; done ;;
+      ''|$'\n') break ;;
       q|Q|$'\e') tui_restore; printf '→ 已取消\n' >&2; return 1 ;;
       *)         continue ;;
     esac

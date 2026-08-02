@@ -83,10 +83,10 @@ make validate        # 離線驗證 manifest 與 skills 結構
   mh-external-advisor      [ ]     [ ]    [ ]  [ ]
   mh-humanizer-zh-tw       [x]     [ ]    [ ]  [ ]
 
-                           [ 還原 ]  [ 取消 ]  [ 確定 ]
+                           [u 還原]  [Esc 取消]  [Enter 確定]
 ```
 
-`↑↓←→` 移動、`空白` 切換、`a`／`r`／`c` 切換全部／整列／整欄。確定後會先印出逐 agent 的增減再執行。
+`↑↓←→` 移動、`空白` 切換該格、`a`／`r`／`c` 切換全部／整列／整欄、`u` 還原、`Enter` 確定、`Esc` 取消。確定後會先印出逐 agent 的增減再執行。
 
 要跳過矩陣直接指定：`make install SKILLS="mh-code-review"`（這條路徑只加不減）。開發時裝工作目錄的內容加 `SOURCE=$PWD`。
 

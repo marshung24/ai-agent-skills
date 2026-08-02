@@ -1,0 +1,4 @@
+{
+  "name": "mh-code-review",
+  "description": "程式碼審查（自我 review／PR review），依風險優先序檢查，支援 GitHub PR 操作。"
+}

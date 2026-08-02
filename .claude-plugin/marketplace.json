@@ -5,26 +5,81 @@
     "name": "mars.hung",
     "url": "https://github.com/marshung24"
   },
-  "description": "Mars Hung 的 Agent Skills 集合，遵循 Agent Skills 規格。",
+  "description": "Mars Hung 的 Agent Skills 集合，遵循 Agent Skills 規格。每個 skill 各自是一個 plugin，可單獨安裝。",
+  "renames": {
+    "mars-skills": null
+  },
   "plugins": [
     {
-      "name": "mars-skills",
-      "source": "./",
-      "description": "Agent Skills 集合：skill 建構方法論、程式碼審查、外部 AI 顧問（第二意見／交叉驗證）、台灣正體 AI 寫作去痕。",
+      "name": "mh-agent-skills-builder",
+      "source": "./plugins/mh-agent-skills-builder",
+      "description": "協助建立、修改和優化 Agent Skills，含設計方法論、多種範本與最佳實踐。",
       "category": "engineering",
       "keywords": [
         "skills",
-        "code-review",
-        "advisor",
-        "second-opinion",
-        "zh-tw",
-        "traditional-chinese"
+        "authoring",
+        "methodology"
       ],
       "author": {
         "name": "mars.hung",
         "url": "https://github.com/marshung24"
       },
-      "homepage": "https://github.com/marshung24/ai-agent-skills",
+      "homepage": "https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-agent-skills-builder",
+      "repository": "https://github.com/marshung24/ai-agent-skills",
+      "license": "MIT"
+    },
+    {
+      "name": "mh-code-review",
+      "source": "./plugins/mh-code-review",
+      "description": "程式碼審查（自我 review／PR review），依風險優先序檢查，支援 GitHub PR 操作。",
+      "category": "engineering",
+      "keywords": [
+        "code-review",
+        "pull-request",
+        "quality"
+      ],
+      "author": {
+        "name": "mars.hung",
+        "url": "https://github.com/marshung24"
+      },
+      "homepage": "https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-code-review",
+      "repository": "https://github.com/marshung24/ai-agent-skills",
+      "license": "MIT"
+    },
+    {
+      "name": "mh-external-advisor",
+      "source": "./plugins/mh-external-advisor",
+      "description": "外部 AI 顧問：非互動諮詢另一支 AI CLI（第二意見／交叉驗證），以明確 id 延續對話。⚠️ 以免互動核可旗標執行，僅限 sandbox／受控環境。",
+      "category": "engineering",
+      "keywords": [
+        "advisor",
+        "second-opinion",
+        "cross-validation"
+      ],
+      "author": {
+        "name": "mars.hung",
+        "url": "https://github.com/marshung24"
+      },
+      "homepage": "https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-external-advisor",
+      "repository": "https://github.com/marshung24/ai-agent-skills",
+      "license": "MIT"
+    },
+    {
+      "name": "mh-humanizer-zh-tw",
+      "source": "./plugins/mh-humanizer-zh-tw",
+      "description": "台灣正體 AI 寫作去痕：24 種核心模式＋5 種台灣補充模式、詞彙表與改寫範例。",
+      "category": "productivity",
+      "keywords": [
+        "zh-tw",
+        "traditional-chinese",
+        "writing",
+        "humanizer"
+      ],
+      "author": {
+        "name": "mars.hung",
+        "url": "https://github.com/marshung24"
+      },
+      "homepage": "https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-humanizer-zh-tw",
       "repository": "https://github.com/marshung24/ai-agent-skills",
       "license": "MIT"
     }

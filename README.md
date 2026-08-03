@@ -16,7 +16,7 @@
 
 | Skill | 說明 |
 |-------|------|
-| [mh-agent-skills-builder](plugins/mh-agent-skills-builder/skills/mh-agent-skills-builder/) | 協助建立、修改和優化 Agent Skills，含設計方法論、多種範本與最佳實踐 |
+| [mh-agent-skills-builder](plugins/mh-agent-skills-builder/skills/mh-agent-skills-builder/) | 協助建立、修改和優化 Agent Skills，含設計方法論、多種範本與最佳實踐；手動啟動 |
 | [mh-external-advisor](plugins/mh-external-advisor/skills/mh-external-advisor/) | 外部 AI 顧問：非互動諮詢另一支 AI CLI（第二意見／交叉驗證），以明確 id 延續對話。⚠️ 以免互動核可旗標執行，僅限 sandbox／受控環境 |
 
 ### Writing

@@ -8,6 +8,15 @@ This work is adapted from:
   - humanizer (https://github.com/blader/humanizer)
     MIT License, Copyright (c) 2025 Siqi Chen
 
+It additionally incorporates concepts from:
+  - speak-human-tw (https://github.com/Raymondhou0917/speak-human-tw)
+    MIT License, Copyright (c) 2026 Raymond Hou (雷蒙三十)
+    Patterns X1-X14 and G1-G2 and the content protection list were derived
+    from this project, then rewritten and restructured for the present work
+    (some of these patterns were later deactivated in v1.2.0, with their
+    numbers reserved). Some identifier strings and short illustrative
+    phrases are carried over.
+
 The AI-writing patterns are based on observations documented in
 "Wikipedia:Signs of AI writing", maintained by WikiProject AI Cleanup
 (https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing).

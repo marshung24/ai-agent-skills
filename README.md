@@ -23,7 +23,7 @@
 
 | Skill | 說明 |
 |-------|------|
-| [mh-humanizer-zh-tw](plugins/mh-humanizer-zh-tw/skills/mh-humanizer-zh-tw/) | 台灣正體 AI 寫作去痕：24 種核心模式＋5 種台灣補充模式、詞彙表與改寫範例 |
+| [mh-humanizer-zh-tw](plugins/mh-humanizer-zh-tw/skills/mh-humanizer-zh-tw/) | 技術文件台灣化與保真微編輯（技術文章、規範、規畫設計、教案、程式註解）：詞彙台灣化、好懂化微調、語意保真；完整去 AI 腔為進階模式（38 種啟用模式） |
 
 ## Installation
 

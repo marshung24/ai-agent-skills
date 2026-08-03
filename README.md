@@ -16,14 +16,14 @@
 
 | Skill | 說明 |
 |-------|------|
-| [mh-agent-skills-builder](plugins/mh-agent-skills-builder/skills/mh-agent-skills-builder/) | 協助建立、修改和優化 Agent Skills，含設計方法論、多種範本與最佳實踐 |
+| [mh-agent-skills-builder](plugins/mh-agent-skills-builder/skills/mh-agent-skills-builder/) | 協助建立、修改和優化 Agent Skills，含設計方法論、多種範本與最佳實踐；手動啟動 |
 | [mh-external-advisor](plugins/mh-external-advisor/skills/mh-external-advisor/) | 外部 AI 顧問：非互動諮詢另一支 AI CLI（第二意見／交叉驗證），以明確 id 延續對話。⚠️ 以免互動核可旗標執行，僅限 sandbox／受控環境 |
 
 ### Writing
 
 | Skill | 說明 |
 |-------|------|
-| [mh-humanizer-zh-tw](plugins/mh-humanizer-zh-tw/skills/mh-humanizer-zh-tw/) | 台灣正體 AI 寫作去痕：24 種核心模式＋5 種台灣補充模式、詞彙表與改寫範例 |
+| [mh-humanizer-zh-tw](plugins/mh-humanizer-zh-tw/skills/mh-humanizer-zh-tw/) | 技術文件台灣化與保真微編輯（技術文章、規範、規畫設計、教案、程式註解）：詞彙台灣化、好懂化微調、語意保真；完整去 AI 腔為進階模式（38 種啟用模式） |
 
 ## Installation
 

@@ -1,6 +1,7 @@
 ---
 name: mh-agent-skills-builder
-description: 協助建立、修改和優化 Agent Skills。當用戶需要建立新的 skill、修改現有 skill、詢問 skill 結構、SKILL.md 格式、YAML 前置資料寫法、description 設計、觸發守門設計、或漸進式披露寫法時使用。
+description: 建立、修改和優化 Agent Skills——skill 結構、SKILL.md 格式、YAML 前置資料、description 設計、觸發守門與漸進式披露。
+disable-model-invocation: true
 ---
 
 # Agent Skills 建構指令

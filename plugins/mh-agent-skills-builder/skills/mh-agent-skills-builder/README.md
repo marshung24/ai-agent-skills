@@ -1,8 +1,10 @@
 # mh-agent-skills-builder
 
-> **版本**：1.1.0｜**更新日期**：2026-07-29
+> **版本**：1.1.1｜**更新日期**：2026-08-03
 
 協助建立、修改和優化 Claude Agent Skills，含多種範本與最佳實踐。
+
+本 skill 為**手動啟動**（`disable-model-invocation: true`），以 `/mh-agent-skills-builder` 呼叫。
 
 ## 參考資料
 

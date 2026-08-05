@@ -955,7 +955,7 @@ marketplace_cleanup() {
     has_plugin "$agent" "$p" && return   # 還有裝著的，不能註銷
   done < <(printf '%s\n' $MP_PLUGINS)
   if has_marketplace "$agent"; then
-    run "$agent：移除 marketplace" "$agent" plugin marketplace remove "$MARKETPLACE"
+    run "${agent}：移除 marketplace" "$agent" plugin marketplace remove "$MARKETPLACE"
   else
     printf '  [略過] %s：marketplace %s 未註冊\n' "$agent" "$MARKETPLACE"
   fi
@@ -1013,7 +1013,7 @@ copy_install() {
   [ "$agent" = opencode ] && { opencode_shared_guard || return; }
 
   # 目的地可能尚未建立（該 agent 從未裝過任何 skill）
-  mkdir -p "$dir" || { echo "  ✗ $agent：無法建立 $dir" >&2; FAILED=1; return; }
+  mkdir -p "$dir" || { echo "  ✗ ${agent}：無法建立 $dir" >&2; FAILED=1; return; }
 
   # 逐一同步；每個 skill 各自判斷是否可安全寫入
   while IFS= read -r s; do
@@ -1028,7 +1028,7 @@ copy_install() {
       FAILED=1; continue
     fi
 
-    run "$agent：$s → $dir" rsync -a --delete "$(skill_dir "$s")/" "$target/"
+    run "${agent}：$s → $dir" rsync -a --delete "$(skill_dir "$s")/" "$target/"
   done < <(target_skills)
 }
 
@@ -1053,9 +1053,9 @@ copy_remove() {
     # symlink 與實體目錄的移除方式不同：對 symlink 用 rm -rf 只會刪到連結本身沒錯，
     # 但分開處理才能在訊息中標示型態，讓使用者看得出剛才移除的是連結而非副本
     if [ -L "$target" ]; then
-      run "$agent：移除 $s（symlink）" rm -f "$target"
+      run "${agent}：移除 ${s}（symlink）" rm -f "$target"
     elif [ -d "$target" ]; then
-      run "$agent：移除 $s" rm -rf "$target"
+      run "${agent}：移除 $s" rm -rf "$target"
     fi
   done < <(target_skills)
 }
@@ -1227,7 +1227,7 @@ do_validate() {
   # agy 驗的是單一 plugin 目錄（它只認該目錄的 plugin.json），故逐個跑
   if have agy; then
     while IFS= read -r sk; do
-      run "agy plugin validate（$sk）" agy plugin validate "$(plugin_dir "$sk")"
+      run "agy plugin validate（${sk}）" agy plugin validate "$(plugin_dir "$sk")"
     done < <(repo_skills)
   fi
 }
@@ -1267,7 +1267,7 @@ install 與 remove 在互動終端會先跳選單讓你挑；非互動（CI、pi
   tools/skills.sh status                                     # 逐 skill 的現況
 EOF
     exit 0 ;;
-  *) echo "錯誤：未知子命令「$CMD」（可用：install/remove/update/status/validate）" >&2; exit 2 ;;
+  *) echo "錯誤：未知子命令「${CMD}」（可用：install/remove/update/status/validate）" >&2; exit 2 ;;
 esac
 
 # ── 決定目標 agent：省略＝全部；指定則先驗證代號，避免拼錯被靜默忽略成「什麼都沒做」 ──
@@ -1277,7 +1277,7 @@ esac
 for sk in $SKILLS; do
   case "$(printf '%s\n' $(repo_skills) | tr '\n' ' ')" in
     *" $sk "*|"$sk "*|*" $sk") ;;
-    *) echo "錯誤：未知 skill「$sk」（可用：$(repo_skills | tr '\n' ' ')）" >&2; exit 2 ;;
+    *) echo "錯誤：未知 skill「${sk}」（可用：$(repo_skills | tr '\n' ' ')）" >&2; exit 2 ;;
   esac
 done
 
@@ -1286,7 +1286,7 @@ TARGETS="${*:-$ALL_AGENTS}"
 for a in $TARGETS; do
   case " $ALL_AGENTS " in
     *" $a "*) ;;
-    *) echo "錯誤：未知 agent「$a」（可用：$ALL_AGENTS）" >&2; exit 2 ;;
+    *) echo "錯誤：未知 agent「${a}」（可用：${ALL_AGENTS}）" >&2; exit 2 ;;
   esac
 done
 

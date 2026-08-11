@@ -49,16 +49,19 @@
 
 | 條件 | Review 結論 |
 |------|------------|
-| 有 🔴 findings | `REQUEST_CHANGES` |
-| 僅 🟡，但數量多或嚴重度接近 🔴 | `REQUEST_CHANGES` |
-| 僅 🟡，數量少且非關鍵 | `COMMENT` |
-| 僅 🟢 或無問題 | `APPROVE` |
+| 有 `BLOCK` 處置（🔴） | `REQUEST_CHANGES` |
+| 無 `BLOCK`，但有 `FIX-IN-PR` 且作者需回應 | `COMMENT`（是否修改依團隊規則） |
+| 僅 `FOLLOW-UP`，已有可定位的 issue／owner，且不需作者在本 PR 回應 | `APPROVE` |
+| `FOLLOW-UP` 的承接資訊需作者確認或補充 | `COMMENT`；確認後 `APPROVE` |
+| 僅 `NO-ACTION`／`SUPPRESSED` 或無問題 | `APPROVE`，不輸出為 actionable finding |
+
+⚠️ **「數量多」不構成升格**——升格條件見 `review-framework.md`〈兩種模式的門檻差異〉。
 
 **REQUEST_CHANGES 應主要保留給**：行為回歸、安全漏洞、明確邏輯缺陷、高機率造成維運事故的問題。
 
 ## 輸出規範
 
-- 完整 🔴🟡🟢 檢查，🟡 門檻較保守（避免偏好升格為阻擋）
+- 完整 🔴🟡🟢 檢查，門檻見 `review-framework.md`〈兩種模式的門檻差異〉PR review 欄
 - 明確區分 blocking findings 與 non-blocking suggestions
 - 語氣適合公開留言（對事不對人、肯定優點再提改進）
 - 不確定是否為問題時，用「確認：...？」提問而非直接斷言
@@ -69,13 +72,22 @@
 
 ## Findings 報告模板
 
+各欄位的定義與缺漏處理，見 `review-framework.md`〈每個 finding 的最小證據〉。
+
 ```markdown
 ## Blocking findings
-- 🔴 [檔案:行號] 問題描述 — 原因 — 建議修正
+- 🔴 `BLOCK` [檔案:行號] 問題描述
+  - 觸發路徑：…
+  - 可觀測後果：…
+  - 建議修正：…
 
 ## Non-blocking suggestions
-- 🟡 [檔案:行號] 問題描述 — 建議
-- 🟢 [檔案:行號] 問題描述 — 可選優化
+- 🟡 `FIX-IN-PR` [檔案:行號] 問題描述
+  - 觸發路徑：… ／ 可觀測後果：… ／ 建議修正：…
+- 🟡 `FOLLOW-UP` [檔案:行號] 問題描述
+  - 觸發路徑：… ／ 可觀測後果：… ／ 建議修正：…
+  - 承接：{issue／owner／批次}
+- 🟢 [檔案:行號] 可選觀察
 
 ## Review decision
 建議 APPROVE / REQUEST_CHANGES / COMMENT

@@ -1,6 +1,6 @@
 # Marketplace 設定指南
 
-> **版本**：2.1.0｜**更新日期**：2026-08-01
+> **版本**：2.1.1｜**更新日期**：2026-08-12
 
 本 repo 如何同時作為 Claude Code／Codex 的 plugin marketplace 發佈，以及各家 agent 的行為差異。所有結論皆為實測所得，升版需重驗。
 
@@ -43,7 +43,6 @@
   "name": "marshung24",              // marketplace 識別名，使用者以 <plugin>@<name> 安裝
   "owner": { "name": "...", "url": "..." },
   "description": "...",
-  "renames": { "mars-skills": null },  // 已下架的舊 plugin，見「下架與遷移」
   "plugins": [
     {
       "name": "mh-code-review",              // plugin 名，本 repo 慣例＝skill 名
@@ -167,15 +166,15 @@ Codex 的預設掃描只認 `<plugin root>/skills/<name>/SKILL.md` 這個形狀�
 | **Claude Code** | 支援 `renames`。`plugin list` 仍列出，但標註 `Note: Removed from the "<marketplace>" marketplace`；`plugin details` 查不到；`plugin uninstall` 可正常移除 |
 | **Codex** | **不認識 `renames`**。`plugin list` 直接看不到它，但 `config.toml` 仍有 `enabled = true`、快取還在，**執行期照樣載入全部 skill**。`plugin remove` 仍可移除 |
 
-所以 manifest 保留：
+所以下架一個 entry 時，manifest 要同時補上：
 
 ```json
-"renames": { "mars-skills": null }
+"renames": { "<舊 plugin 名>": null }
 ```
 
-`null` 表示該 plugin 已移除。Claude Code 會據此給提示；Codex 忽略這個未知欄位（實測不影響解析）。
+`null` 表示該 plugin 已移除。Claude Code 會據此給提示；Codex 忽略這個未知欄位（實測不影響解析）。目前沒有需要追蹤的下架 plugin，故 manifest 不寫這個欄位。
 
-`tools/skills.sh` 也以此為單一事實來源：從 `renames` 的 key 取得「已下架但可能還裝著」的名單，並且
+`tools/skills.sh` 也以此為單一事實來源：從 `renames` 的 key 取得「已下架但可能還裝著」的名單（沒有這個欄位時名單為空，偵測整段略過），並且
 
 - `status`：偵測到就多印一列 `⚠遺留`（codex 那側改讀 `config.toml`，因為 `plugin list` 看不到）
 - `install`：偵測到就擋下（舊 plugin 一裝就是全部 skill，必然與新的重疊）
@@ -206,7 +205,7 @@ curl -sL -o /tmp/mp.json https://json.schemastore.org/claude-code-marketplace.js
 python3 -c "import json,jsonschema;jsonschema.Draft202012Validator(json.load(open('/tmp/mp.json'))).validate(json.load(open('.claude-plugin/marketplace.json')))"
 ```
 
-> `renames` 目前不在 schemastore 的 schema 裡（schema 較舊），但因為它沒有設 `additionalProperties: false`，仍可通過；`claude plugin validate --strict` 也接受。
+> 若寫了 `renames`：它目前不在 schemastore 的 schema 裡（schema 較舊），但因為沒有設 `additionalProperties: false`，仍可通過；`claude plugin validate --strict` 也接受。
 
 ---
 

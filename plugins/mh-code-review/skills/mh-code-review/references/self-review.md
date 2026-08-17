@@ -36,24 +36,22 @@
 ## 輸出規範
 
 - **語氣**：工程化、直接，可立即銜接修改
-- **🟡 門檻**：可寬鬆，允許早期提醒與設計建議（但標示為非阻擋）
+- **🟡 門檻**：見 `review-framework.md`〈兩種模式的門檻差異〉自我 review 欄；一律標示為非阻擋
 - **🟢**：通常省略，除非特別值得一提
 - **無問題時**：明確說「未發現 blocking issue」，可補充殘餘風險或測試缺口
 - **行為**：只報告，不操作 git / gh
 
 ## Findings 轉工程建議
 
-每個 finding 應包含：
-
-1. **風險說明**：為什麼這是問題
-2. **影響情境**：什麼條件下會觸發
-3. **建議修法**：具體的修正方向或程式碼
+每個 finding 的必填欄位與缺漏處理，見 `review-framework.md`〈每個 finding 的最小證據〉：觸發路徑、可觀測後果、處置、建議修法。
 
 好的 finding 範例：
 ```
-🔴 [src/Services/OrderService.php:142]
-$order->delete() 直接硬刪除，但 ReportService 仍會查詢此 order
-→ 改用 soft delete 或先確認無下游依賴
+🔴 `BLOCK` [src/Services/OrderService.php:142]
+$order->delete() 直接硬刪除
+- 觸發路徑：使用者於訂單列表刪除任一筆已產報表的訂單
+- 可觀測後果：ReportService 查詢該 order 取得 null，報表頁 500
+- 建議修正：改用 soft delete，或先確認無下游依賴
 ```
 
 不好的 finding 範例：
@@ -69,10 +67,16 @@ $order->delete() 直接硬刪除，但 ReportService 仍會查詢此 order
 ## Review 結果
 
 ### 🔴 高風險
-- [檔案:行號] 問題描述 → 修正建議
+- 🔴 `BLOCK` [檔案:行號] 問題描述
+  - 觸發路徑：…
+  - 可觀測後果：…
+  - 建議修正：…
 
 ### 🟡 建議
-- [檔案:行號] 問題描述 → 修正建議
+- 🟡 `FIX-IN-PR` [檔案:行號] 問題描述
+  - 觸發路徑：…
+  - 可觀測後果：…
+  - 建議修正：…
 
 ### Open questions
 - 資訊不足無法確認的假設或疑慮（僅在有疑慮時列出）

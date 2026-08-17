@@ -6,9 +6,6 @@
     "url": "https://github.com/marshung24"
   },
   "description": "Mars Hung 的 Agent Skills 集合，遵循 Agent Skills 規格。每個 skill 各自是一個 plugin，可單獨安裝。",
-  "renames": {
-    "mars-skills": null
-  },
   "plugins": [
     {
       "name": "mh-agent-skills-builder",

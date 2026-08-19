@@ -27,12 +27,12 @@
 | 項目 | 內容 |
 |------|------|
 | stdout | AI 回覆純文字；成功且取得 id 時最後一行為 `[External Advisor <AI名> session_id: <id>]`（AI 名＝codex/claude/opencode/agy），未取得 id 時該行缺席（stderr 印 `[warn]`） |
-| stderr | 警告／錯誤（含失敗時的 CLI stderr 末幾行，供診斷） |
+| stderr | 警告／錯誤（含失敗時的 CLI stderr 末幾行，供診斷；opencode 另印其 stdout 錯誤事件訊息與 stdout 末幾行——錯誤在 stdout，見底層指令節） |
 | exit 0 | 成功 |
 | exit 2 | 參數錯誤（缺 prompt、`-r` 的 id 為空字串等——空 id 常見於上一輪擷取失敗，若放行會靜默開新重送，故必擋） |
 | exit 3 | resume 失敗。涵蓋範圍：codex/claude/opencode＝resume 路徑上 CLI 任何非零結束（含 id 失效與暫時性錯誤，看 stderr 區分）；agy＝僅「id 不存在」（前置檢查）。**有效但屬別段的 id 皆無法偵測**，會靜默接錯脈絡（防範靠呼叫端簿記，見 SKILL.md 的多段並存規則） |
 | exit 1 | 執行失敗：無回覆，或有回覆但不可採信（claude＝`is_error=true` 時錯誤文字不當回覆輸出；agy＝CLI 非零時不信任 stdout 的殘缺內容）。**可能已產生部分副作用**，重送前先評估 |
-| exit 127 | 缺依賴（CLI 未安裝或缺 `jq`；opencode 另含「偵測不到免互動旗標」——旗標名版本相依，見底層指令節） |
+| exit 127 | 缺依賴（CLI 未安裝或缺 `jq`；opencode 另含「能力查詢失敗」與「偵測不到免互動旗標」——旗標名版本相依，見底層指令節） |
 
 - 輸出末行標記前一律先驗 id 格式，不合格即**視同未取得 id**（清空改印 `[warn]`，不輸出不可信的 id）：agy 用 `^[A-Za-z0-9-]+$`（id 靠目錄名推測、來源可能污損，故從嚴）；codex/claude/opencode 用 `^[[:graph:]]+$`（id 直接取自各 CLI 的 JSON 欄位，只擋會撐破末行契約的空白與控制字元，過嚴會在上游改格式時誤殺）
 - 成功但未取得 id 時：stdout 無 `[External Advisor ...]` 行，stderr 印 `[warn] 未取得 session_id…，本段對話無法延續`——呼叫端據此得知不可延續。**判斷一律認 `[warn]` 前綴，勿比對全文**：括號內的補充說明各腳本不同（如 agy 會註明是 brain 目錄偵測失敗）。
@@ -85,7 +85,8 @@ ask-<ai>.sh --info                               # 印自述（供 getter 組裝
 | agy | `agy --dangerously-skip-permissions -p "<prompt>"` | 加 `--conversation <id>`（置於 `-p` 前） | stdout 純文字（無 JSON） | 磁碟偵測 `brain/` 新增目錄名 |
 
 - codex/claude 的 prompt 走 stdin（codex 用 `-`），免長字串／特殊字元的引號轉義；opencode 的 `run` 以引數收 prompt，前置 `--` 分隔符防止以 `-` 開頭的 prompt 被誤解析為旗標；agy 的 `-p` 是**吃值旗標**（prompt 即其值），必須排在其他旗標之後、prompt 緊跟其後
-- opencode 的 `<免互動旗標>` 由 `run --help` 動態偵測（舊名 `--dangerously-skip-permissions` 優先、次選 `--auto`，皆無則 exit 127）——旗標名版本相依且未知旗標不報錯，hardcode 會在升版後靜默失效，理由見設計取捨
+- opencode 的 `<免互動旗標>` 由 `run --help` 偵測（公開名 `--auto` 優先、次選 hidden 舊名 `--dangerously-skip-permissions`，皆無則 exit 127；`--help` 本身失敗另報「能力查詢失敗」）——旗標名版本相依，理由見設計取捨
+- opencode 的錯誤走 **stdout 的 `error` 事件**（`.error.data.message`），stderr 可能全空（實測 1.18.18）——故其失敗診斷一律印「錯誤事件訊息＋stderr 尾＋stdout 尾」三段
 - NDJSON 一律 slurp 整檔後在 jq 內取值（多行文字安全；**不可**對 jq 輸出行用 `tail`/`head` 取「最後一則」，會截斷多行回覆）
 - NDJSON 逐行以 `fromjson? // empty` 容錯（會夾雜非 JSON 警告行）
 
@@ -114,7 +115,7 @@ ask-<ai>.sh --info                               # 印自述（供 getter 組裝
 - **明確 id 而非 `--last`／`--continue`**：`--last` 只取「當前 cwd 最新一段」，多任務交錯或換目錄會誤接到無關 session；明確 id 天然綁定「這個任務」，且不受 cwd 影響。
 - **stateless、不存 pointer 檔**：id 由呼叫端保存在自身對話脈絡。副作用是 `/clear` 後 id 自然遺失 → 免 hook／環境變數即達成「session 隨 Claude session 生命週期」。
 - **resume 失敗不自動重送**（Codex review 指出）：prompt 可能含副作用指示，自動 fallback 開新重送有重複執行風險；exit 3 交由呼叫端決定。
-- **保留免互動核可旗標**（codex/claude/agy 為 `--dangerously-*`；opencode 為版本相依，腳本以 `--help` 動態偵測公開旗標名——1.17.10 為 `--dangerously-skip-permissions`，約 1.17.12 起更名 `--auto`、舊名轉 hidden 相容別名）：本 workspace 定位為外部沙箱環境，諮詢型呼叫需免互動核可才能自動化；此 skill 若移作他用需重新評估。注意 opencode 對未知旗標不報錯（非嚴格解析），hidden 別名被上游移除時會靜默失去免互動核可——這是動態偵測而非 hardcode 的原因。
+- **保留免互動核可旗標**（codex/claude/agy 為 `--dangerously-*`；opencode 為版本相依，腳本以 `--help` 偵測公開旗標名——1.17.10 為 `--dangerously-skip-permissions`，約 1.17.12 起更名 `--auto`、舊名轉 hidden 相容別名）：本 workspace 定位為外部沙箱環境，諮詢型呼叫需免互動核可才能自動化；此 skill 若移作他用需重新評估。偵測而非 hardcode 或版本號推斷：能力偵測不受版本字串與 downstream build 影響，且在送出 prompt 前就失敗（完整證據鏈見 design.md §5.5）。
 - **claude 用 `--output-format json` 而非 `stream-json`**：同步 wrapper 只需等最終結果、無 idle timeout 顧慮，單一 JSON 物件解析更簡單。
 
 ## 疑難排解
@@ -122,7 +123,7 @@ ask-<ai>.sh --info                               # 印自述（供 getter 組裝
 | 症狀 | 檢查 |
 |------|------|
 | exit 4（`advisor-list.sh`） | 尚未啟用任何顧問——請使用者跑 `advisor-set.sh <ai>...`。設定檔不存在、格式污損、清單為空皆回此碼；污損時 stderr 另有 `[warn]` |
-| exit 127 | 對應 CLI 或 `jq` 未安裝／不在 PATH；opencode 另可能是免互動旗標偵測失敗（升版更名），以 `opencode run --help` 確認 |
+| exit 127 | 對應 CLI 或 `jq` 未安裝／不在 PATH；opencode 另可能是 `run --help` 執行失敗（CLI 損壞／環境異常）或免互動旗標偵測失敗（升版更名），以 `opencode run --help` 確認 |
 | exit 3 | 看 stderr 區分：暫時性錯誤 → 同 id 重試；id 確實失效 → 確認無重複執行疑慮後不帶 `-r` 重送 |
 | 無回覆、exit 1 | 看 stderr 印的 CLI stderr／stdout 末段；確認 CLI 已登入 |
 | resume 沒記得前文 | 確認帶的 `-r <id>` 是上一次輸出末行那個 id |

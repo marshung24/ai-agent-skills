@@ -130,7 +130,8 @@
 - **取**：維持免互動核可旗標（codex/claude/agy hardcode `--dangerously-*`；opencode 因旗標名版本相依改以 `--help` 動態偵測，見本節末段），以文件明示風險與使用前提
 - **理由**：諮詢型呼叫需免互動核可才能自動化，本 skill 的預設使用情境即為沙箱／受控環境；加設定項會增加介面複雜度，且「安全模式」在各 CLI 的旗標與語意不一致，統一外殼難以維持一致契約。
 - **風險聲明**：這些旗標讓外部 CLI 跳過互動核可與沙箱限制——被諮詢的 AI 取得**與執行使用者相同的檔案、程序、網路與憑證權限，不限當前工作目錄**（可讀 `$HOME`、SSH/cloud 憑證、其他 repo，可對外連網），一句含副作用指示的 prompt、或被讀取內容中的 prompt injection，就足以觸發改檔案、跑指令、外送資料。**只有在已隔離檔案系統、敏感憑證、網路與宿主控制介面的 sandbox 中才可視為安全**——「容器」本身不等於安全（掛 Docker socket、注入 production 憑證、可自由連網的容器都不算）；已版控只防檔案損毀，防不了資料外洩與外部副作用。README 對使用者同步載明此前提。
-- **旗標為版本相依（opencode 以 `--help` 動態偵測）**：實測證據鏈——1.17.10 的 `run --help` 列 `--dangerously-skip-permissions`；1.17.18 改列 `--auto`，但執行檔內仍含舊名字串、帶舊旗標呼叫仍成功（源碼 `run.ts`：`--auto` 公開、`--yolo` 與 `--dangerously-skip-permissions` 為 `hidden: true`，三者在 handler 內 OR 合併），即**約 1.17.12 起公開名更名為 `--auto`、舊名轉 hidden 相容別名**。另實測 opencode 對未知旗標不報錯（非嚴格解析）——hidden 別名一旦被上游移除，帶舊名呼叫會變 no-op 且無任何錯誤，免互動核可靜默失效。故 `ask-opencode.sh` 不 hardcode，改以 `run --help` 偵測公開旗標名（舊名優先、次選 `--auto`、皆無則 exit 127 明確報錯）。其餘三支 CLI 升版後仍需以 `--help` 重驗旗標存在。
+- **旗標為版本相依（opencode 以 `--help` 動態偵測）**：實測證據鏈——1.17.10 的 `run --help` 列 `--dangerously-skip-permissions`；1.17.18 改列 `--auto`，但執行檔內仍含舊名字串、帶舊旗標呼叫仍成功（源碼 `run.ts`：`--auto` 公開、`--yolo` 與 `--dangerously-skip-permissions` 為 `hidden: true`，三者在 handler 內 OR 合併），即**約 1.17.12 起公開名更名為 `--auto`、舊名轉 hidden 相容別名**。故 `ask-opencode.sh` 不 hardcode、也不以版本號推斷，改以 `run --help` 偵測公開旗標名（公開名 `--auto` 優先、次選 hidden 舊名、皆無則 exit 127；`--help` 本身非零結束另報「能力查詢失敗」，不誤報成更名）：能力偵測不受版本字串、downstream build 影響，且在送出 prompt 前就失敗。**旗標名的比對一律用邊界比對**——子字串比對會誤中 `--autoupdate`，也會在 help 說明文字提及舊名時選到即將消失的別名。其餘三支 CLI 升版後仍需以 `--help` 重驗旗標存在。
+  - 1.17.x 的觀測「opencode 對未知旗標不報錯（非嚴格解析）」**已於 1.18.18 失效**：實測未知旗標會 exit 1 並印 help，即旗標失效在 1.18+ 為顯性錯誤。此前提原本是動態偵測的主要理由（怕別名被移除後靜默失去核可）；前提改變後結論不變，理由改為向下相容仍只有舊名的 1.17.x。
 
 ### 5.6 穩定可靠優先的收斂決策
 以「寧可少功能也要可靠」收斂三條使用規則：
@@ -210,7 +211,7 @@
 | agy 前置驗證 | `-r ../../etc` → rc 2（路徑蒙混）；`-r <不存在>` → rc 3 | 全過 |
 | getter | 未設定／清空後／設定檔污損 → rc 4；已設定 → rc 0 且呼叫式為絕對路徑 | 全過 |
 | setter | 覆寫／`--add` 冪等／`--remove`／`--clear` → rc 0；不支援名（`--remove` 除外，見下）、路徑蒙混、無參數、`--clear` 帶參數 → rc 2 | 全過 |
-| opencode 旗標偵測 | `run --help` 邊界比對命中 `--auto`（1.17.12+ 公開名） | 通過 |
+| opencode 旗標偵測 | `run --help` 邊界比對命中 `--auto`（1.17.12+ 公開名，1.18.18 覆測）；`--help` 非零結束改報「能力查詢失敗」 | 通過 |
 | 設定檔健壯性 | 單項不合法只丟該項（合法項保留）；多行字串不被拆成多支；`version` 非 1／`enabled` 非陣列／非 JSON → rc 4；`--info` 非零結束碼不算可用；setter 拒收非 executable adapter | 全過 |
 | 路徑穿越 | 設定檔含 `x/../../../evil` 之類名稱 → 被擋且未執行外部腳本 | 通過 |
 
@@ -223,7 +224,7 @@
 ## 7. 已知限制
 
 - agy 的 id 取得依賴內部儲存位置（§5.4），版本升級需重驗；**同一 state 目錄（同一使用者）下任何並行開新**都有錯配窗口——主路徑以 cwd 查表，但 fallback 掃整個 `brain/`，不限同 cwd。另 `-newer $MARK` 的偵測依賴檔案系統 mtime 粒度——粗粒度（秒級）檔案系統上，與 marker 同秒建立的對話目錄可能漏判（現代 ext4/APFS 為奈秒級，實務影響極低）；fallback 的 `find -exec ls -td {} +` 在目錄數超過單批 argv 上限時會分批執行、排序失準（需上千個對話目錄才觸發，機率低）
-- 各 CLI 的免互動旗標為版本相依（§5.5）；opencode 已改動態偵測，codex/claude/agy 仍為 hardcode，升版需以 `--help` 重驗。opencode 對未知旗標不報錯（非嚴格解析），旗標失效無法靠錯誤偵測
+- 各 CLI 的免互動旗標為版本相依（§5.5）；opencode 已改動態偵測，codex/claude/agy 仍為 hardcode，升版需以 `--help` 重驗。opencode 在 1.17.x 對未知旗標不報錯（旗標失效無法靠錯誤偵測），1.18.18 起改為顯性 exit 1
 - 各 CLI 的事件格式為觀測所得（smoke test 確認），官方未必保證穩定；解析已以 `fromjson? // empty` 容錯，但欄位更名仍會失效
 - 無自動化測試（§6 待辦）；`ask-claude.sh` 的 `is_error=true` 分支未實跑驗證（需真實觸發 max-turns 等錯誤）
 - `advisor-set.sh` 為 read-modify-write 且無鎖，**不可並行**：兩個 setter 交錯執行會互相覆蓋（Codex review 指出）。不加 lock 是取捨——lock 目錄在強殺後殘留會永久卡住 setter，比競態更糟，而 setter 是使用者偶爾手動跑一次的設定指令

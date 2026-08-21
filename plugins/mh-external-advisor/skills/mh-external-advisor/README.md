@@ -1,6 +1,6 @@
 # mh-external-advisor
 
-> **版本**：2.1.0｜**更新日期**：2026-07-29
+> **版本**：2.2.0｜**更新日期**：2026-08-21
 
 外部顧問：把另一個 AI CLI（Codex、Claude、Opencode 或 Antigravity）當顧問諮詢——非互動送出 prompt、取回回覆，並以明確 id 延續同一段對話，用於第二意見、交叉驗證、盲點檢查等需要異質觀點的場景。
 
@@ -16,7 +16,7 @@ mh-external-advisor/
 │   ├── ask-codex.sh         # 詢問 Codex（codex exec）
 │   ├── ask-claude.sh        # 詢問 Claude（claude -p）
 │   ├── ask-opencode.sh      # 詢問 Opencode（opencode run）
-│   └── ask-agy.sh           # 詢問 Antigravity（agy -p，id 磁碟偵測）
+│   └── ask-agy.sh           # 詢問 Antigravity（agy -p）
 ├── references/
 │   └── detail.md            # 輸出契約、清單腳本、底層指令、設計取捨、疑難排解
 └── docs/
@@ -37,12 +37,12 @@ scripts/ask-codex.sh "幫我看這段邏輯有沒有問題：…"
 scripts/ask-codex.sh -r <id> "那如果併發呼叫呢？"
 ```
 
-四支 `ask-*.sh` 介面相同（`[-r <session_id>] [--] "<prompt>"`、末行印 id；prompt 以 `-` 開頭時必加 `--`）；僅 agy 的 id 為磁碟偵測取得。id 的嚴謹擷取（末行比對、exit code 與 `[warn]` 檢查）與其他細節見 [references/detail.md](references/detail.md)。
+四支 `ask-*.sh` 介面相同（`[-r <session_id>] [--] "<prompt>"`、末行印 id；prompt 以 `-` 開頭時必加 `--`）。id 的嚴謹擷取（末行比對、exit code 與 `[warn]` 檢查）與其他細節見 [references/detail.md](references/detail.md)。
 
 ## 需求
 
 - `codex` / `claude` / `opencode` / `agy` CLI 已安裝、登入且在 PATH（只需安裝要用的那個）
-- `jq`（各腳本皆需：解析 CLI 的 JSON 輸出、agy 的 id 對照表、啟用清單設定檔）
+- `jq`（各腳本皆需：解析 CLI 的 JSON 輸出與啟用清單設定檔）
 
 ## 啟用清單
 

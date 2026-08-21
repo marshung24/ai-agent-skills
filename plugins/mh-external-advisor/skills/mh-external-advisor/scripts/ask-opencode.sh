@@ -11,7 +11,7 @@
 #   輸出  ─ stdout：Opencode 回覆文字；最後一行 `[External Advisor opencode session_id: <id>]`（供下次 -r 延續）
 #   結束碼─ 0 成功；2 參數錯誤；3 resume 失敗；1 執行失敗（無回覆或回覆不可採信，
 #           可能已有部分副作用）；
-#           127 缺依賴（CLI/jq 未安裝，或偵測不到免互動旗標）
+#           127 缺依賴（CLI/jq 未安裝、能力查詢失敗，或偵測不到免互動旗標）
 #
 # 用法：
 #   ask-opencode.sh "問題"                      # 開新 session
@@ -58,20 +58,20 @@ if [ -z "$PROMPT" ] && [ ! -t 0 ]; then PROMPT="$(cat)"; fi
 [ -n "$PROMPT" ] || { echo "錯誤：缺少 prompt（參數或 stdin 傳入）" >&2; exit 2; }
 
 # ── 共用旗標：自動核可權限（本環境定位為外部沙箱）、輸出 NDJSON 事件流 ──
-# DECISION: 免互動旗標以 --help 動態偵測公開旗標名，不 hardcode——
-#           公開名依版本而異：1.17.10 為 --dangerously-skip-permissions，約 1.17.12 起
-#           更名 --auto、舊名轉 hidden 相容別名（仍有效但不列 help，上游可能隨時移除）；
-#           且 opencode 對未知旗標不報錯（非嚴格解析，實測），別名一旦移除即靜默失去
-#           免互動核可、無從偵測——故一律跟隨 help 中的公開名，兩者皆無才明確報錯
-RUN_HELP="$(opencode run --help 2>&1)"
-if grep -q -e '--dangerously-skip-permissions' <<<"$RUN_HELP"; then
-  AUTO_FLAG="--dangerously-skip-permissions"
-elif grep -qE -- '(^|[[:space:]])--auto([[:space:]=,]|$)' <<<"$RUN_HELP"; then
-  # --auto 用邊界比對：子字串比對會誤中 --autoupdate 之類旗標，
-  # 配上「未知旗標不報錯」的特性，誤中即靜默失去免互動核可
+# DECISION: 未採 hardcode 旗標名，因公開名依版本更名，偵測才能在送出前失敗
+# 順序跟隨 help 中的公開名（--auto 在前），兩者皆用邊界比對：子字串比對會誤中 --autoupdate，
+# 也會在 help 說明文字提及舊名時選到即將消失的別名
+if ! RUN_HELP="$(opencode run --help 2>&1)"; then
+  { echo "錯誤：無法查詢 opencode 能力（opencode run --help 執行失敗），CLI 可能損壞或環境異常。輸出末幾行："
+    printf '%s\n' "$RUN_HELP" | tail -5; } >&2
+  exit 127
+fi
+if grep -qE -- '(^|[[:space:]])--auto([[:space:]=,]|$)' <<<"$RUN_HELP"; then
   AUTO_FLAG="--auto"
+elif grep -qE -- '(^|[[:space:]])--dangerously-skip-permissions([[:space:]=,]|$)' <<<"$RUN_HELP"; then
+  AUTO_FLAG="--dangerously-skip-permissions"
 else
-  echo "錯誤：偵測不到 opencode 的免互動核可旗標（--dangerously-skip-permissions / --auto），版本可能又更名，請以 opencode run --help 確認" >&2
+  echo "錯誤：偵測不到 opencode 的免互動核可旗標（--auto / --dangerously-skip-permissions），版本可能又更名，請以 opencode run --help 確認" >&2
   exit 127
 fi
 COMMON=(run "$AUTO_FLAG" --format json)
@@ -80,23 +80,44 @@ COMMON=(run "$AUTO_FLAG" --format json)
 LOG="$(mktemp)"; ERR="$(mktemp)"
 trap 'rm -f "$LOG" "$ERR"' EXIT
 
+# 失敗診斷：opencode 把錯誤原因放在 stdout 的 error 事件（實測 1.18.18，stderr 可能全空），
+# 故印錯誤訊息 + 事件型別序列 + stderr。不倒 stdout 原文——NDJSON 一則事件即一行，
+# 而 text 事件內含回覆片段，以「行」設限等於不設限，回覆會滲進呼叫端的錯誤日誌
+DIAG_BYTES=800
+DIAG_EVENTS=20
+diag() {
+  local msg types
+  msg="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
+    | map(select(.type=="error") | .error | .data.message // .message // .name // empty)
+    | last // empty' "$LOG" 2>/dev/null)"
+  [ -n "$msg" ] && echo "opencode 錯誤事件：$msg"
+  types="$(jq -Rrs --argjson n "$DIAG_EVENTS" 'split("\n") | map(fromjson? // empty)
+    | map(.type // empty) | (if length > $n then ["…"] + .[-$n:] else . end)
+    | join(" → ")' "$LOG" 2>/dev/null)"
+  if [ -n "$types" ]; then
+    echo "opencode 事件序列：$types"
+  else
+    echo "opencode stdout 末 ${DIAG_BYTES} bytes（非 NDJSON 或全空）："; tail -c "$DIAG_BYTES" "$LOG"; echo
+  fi
+  echo "opencode stderr 末 ${DIAG_BYTES} bytes："; tail -c "$DIAG_BYTES" "$ERR"
+}
+
 # ── 執行 Opencode ──
 # opencode 的 prompt 走命令列引數（其 run 子命令非以 stdin 收 prompt）；
 # prompt 前加 `--` 分隔符，防止以 `-` 開頭的 prompt 被誤解析為旗標（實測支援）
-# DECISION: resume 失敗不自動改開新 session 重送——prompt 可能含有副作用指示，
-#           自動重送有重複執行風險；改以 exit 3 讓呼叫端自行決定是否重送
+# DECISION: 未採失敗自動開新重送，因 prompt 含副作用指示時會重複執行
 if [ -n "$RESUME" ]; then
   opencode "${COMMON[@]}" --session "$RESUME" -- "$PROMPT" >"$LOG" 2>"$ERR"
   if [ $? -ne 0 ]; then
-    { echo "錯誤：resume 失敗（session 可能已失效）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。stderr 末幾行："
-      tail -5 "$ERR"; } >&2
+    { echo "錯誤：resume 失敗（session 可能已失效）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。"
+      diag; } >&2
     exit 3
   fi
 else
   opencode "${COMMON[@]}" -- "$PROMPT" >"$LOG" 2>"$ERR"
   # 開新失敗：CLI 非零即停，不信任部分輸出（可能是被中斷的殘缺回覆）
   if [ $? -ne 0 ]; then
-    { echo "錯誤：opencode 執行失敗。stderr 末幾行："; tail -5 "$ERR"; } >&2
+    { echo "錯誤：opencode 執行失敗。"; diag; } >&2
     exit 1
   fi
 fi
@@ -109,14 +130,14 @@ ANSWER="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
 SID="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
   | map(.sessionID // empty) | map(select(. != "")) | first // empty' "$LOG")"
 # 輸出契約防護：id 必須是單行可見字元，否則末行標記會被撐成多行或被偽造
-# DECISION: 不比照 agy 的嚴格字元集、且驗證擺在 RESUME 沿用之前——理由同 ask-codex.sh
+# DECISION: 未採嚴格字元集與先沿用後驗證，因理由同 ask-codex.sh
 if [ -n "$SID" ] && ! [[ "$SID" =~ ^[[:graph:]]+$ ]]; then SID=""; fi
 # resume 時若事件未帶合格 id，沿用傳入的 RESUME 以維持延續性
 if [ -n "$RESUME" ] && [ -z "$SID" ] && [[ "$RESUME" =~ ^[[:graph:]]+$ ]]; then SID="$RESUME"; fi
 
-# ── 輸出：回覆 + 供延續的 session id；失敗時連 stderr 一起印出供診斷 ──
+# ── 輸出：回覆 + 供延續的 session id；失敗時一併印出診斷 ──
 if [ -z "$ANSWER" ]; then
-  { echo "錯誤：Opencode 無回覆。stderr 末幾行："; tail -5 "$ERR"; echo "stdout 末幾行："; tail -5 "$LOG"; } >&2
+  { echo "錯誤：Opencode 無回覆。"; diag; } >&2
   exit 1
 fi
 printf '%s\n' "$ANSWER"

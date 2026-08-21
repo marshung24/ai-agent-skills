@@ -57,32 +57,33 @@ if [ -z "$PROMPT" ] && [ ! -t 0 ]; then PROMPT="$(cat)"; fi
 [ -n "$PROMPT" ] || { echo "錯誤：缺少 prompt（參數或 stdin 傳入）" >&2; exit 2; }
 
 # ── 共用旗標 ──
-# DECISION: 用 --output-format json（單一物件、jq 直取）而非 stream-json——
-#           同步 wrapper 只需等最終結果、無 idle timeout 顧慮，無須逐 event 串流
-# DECISION: 保留 --dangerously-skip-permissions——本 workspace 定位為外部沙箱環境，
-#           諮詢型呼叫需免互動核可才能自動化；若移作他用，呼叫端應自行評估此預設
+# DECISION: 未採 stream-json，因同步 wrapper 只需等最終結果
+# DECISION: 未採預設安全模式，因諮詢型呼叫需免互動核可才能自動化
 COMMON=(-p --output-format json --dangerously-skip-permissions)
 
 # 暫存 stdout / stderr：stdout 供解析，stderr 供失敗診斷（不吞掉）
 LOG="$(mktemp)"; ERR="$(mktemp)"
 trap 'rm -f "$LOG" "$ERR"' EXIT
 
+# 診斷輸出一律以 byte 設限：claude 的回覆在 stdout 單一 JSON 物件的 .result，
+# 整份輸出只有一行，以「行」設限等於不設限（回覆會滲進呼叫端的錯誤日誌）
+DIAG_BYTES=800
+
 # ── 執行 Claude ──
 # prompt 走 stdin，避免長字串/特殊字元的引號轉義問題
-# DECISION: resume 失敗不自動改開新 session 重送——prompt 可能含有副作用指示，
-#           自動重送有重複執行風險；改以 exit 3 讓呼叫端自行決定是否重送
+# DECISION: 未採失敗自動開新重送，因 prompt 含副作用指示時會重複執行
 if [ -n "$RESUME" ]; then
   printf '%s' "$PROMPT" | claude "${COMMON[@]}" --resume "$RESUME" >"$LOG" 2>"$ERR"
   if [ $? -ne 0 ]; then
-    { echo "錯誤：resume 失敗（session 可能已失效）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。stderr 末幾行："
-      tail -5 "$ERR"; } >&2
+    { echo "錯誤：resume 失敗（session 可能已失效）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。"
+      echo "claude stderr 末 ${DIAG_BYTES} bytes："; tail -c "$DIAG_BYTES" "$ERR"; } >&2
     exit 3
   fi
 else
   printf '%s' "$PROMPT" | claude "${COMMON[@]}" >"$LOG" 2>"$ERR"
   # 開新失敗：CLI 非零即停，不信任部分輸出（可能是被中斷的殘缺回覆）
   if [ $? -ne 0 ]; then
-    { echo "錯誤：claude 執行失敗。stderr 末幾行："; tail -5 "$ERR"; } >&2
+    { echo "錯誤：claude 執行失敗。claude stderr 末 ${DIAG_BYTES} bytes："; tail -c "$DIAG_BYTES" "$ERR"; } >&2
     exit 1
   fi
 fi
@@ -93,7 +94,7 @@ ANSWER="$(jq -r '.result // empty' "$LOG")"
 SID="$(jq -r '.session_id // empty' "$LOG")"
 ISERR="$(jq -r '.is_error // false' "$LOG")"
 # 輸出契約防護：id 必須是單行可見字元，否則末行標記會被撐成多行或被偽造
-# DECISION: 不比照 agy 的嚴格字元集、且驗證擺在 RESUME 沿用之前——理由同 ask-codex.sh
+# DECISION: 未採嚴格字元集與先沿用後驗證，因理由同 ask-codex.sh
 if [ -n "$SID" ] && ! [[ "$SID" =~ ^[[:graph:]]+$ ]]; then SID=""; fi
 # resume 時若輸出未帶合格 id，沿用傳入的 RESUME 以維持延續性（與 codex/opencode 一致）
 if [ -n "$RESUME" ] && [ -z "$SID" ] && [[ "$RESUME" =~ ^[[:graph:]]+$ ]]; then SID="$RESUME"; fi
@@ -101,13 +102,15 @@ if [ -n "$RESUME" ] && [ -z "$SID" ] && [[ "$RESUME" =~ ^[[:graph:]]+$ ]]; then 
 # CLI exit 0 但回報執行錯誤（is_error=true，如 max-turns 用盡）：
 # 錯誤文字不可當正常回覆輸出（呼叫端會誤信並拿 id 延續）
 if [ "$ISERR" = "true" ]; then
-  { echo "錯誤：Claude 回報執行錯誤（is_error=true）。回覆內容開頭："; printf '%s' "$ANSWER" | head -c 500; echo; } >&2
+  { echo "錯誤：Claude 回報執行錯誤（is_error=true）。錯誤文字首 ${DIAG_BYTES} bytes："
+    printf '%s' "$ANSWER" | head -c "$DIAG_BYTES"; echo; } >&2
   exit 1
 fi
 
 # ── 輸出：回覆 + 供延續的 session id；失敗時連 stderr 一起印出供診斷 ──
 if [ -z "$ANSWER" ]; then
-  { echo "錯誤：Claude 無回覆。stderr 末幾行："; tail -5 "$ERR"; echo "stdout 開頭："; head -c 500 "$LOG"; } >&2
+  { echo "錯誤：Claude 無回覆。claude stderr 末 ${DIAG_BYTES} bytes："; tail -c "$DIAG_BYTES" "$ERR"
+    echo "claude stdout 首 ${DIAG_BYTES} bytes（此分支 .result 已為空）："; head -c "$DIAG_BYTES" "$LOG"; echo; } >&2
   exit 1
 fi
 printf '%s\n' "$ANSWER"

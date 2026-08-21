@@ -2,8 +2,8 @@
 # enabled-io.sh — 啟用清單的共用讀取與驗證（供 advisor-list.sh / advisor-set.sh 引用）
 #
 # 用途：把「什麼是合法的顧問名」「什麼是合法的設定檔」「哪些 adapter 算支援」
-#       三條規則放在同一處。getter 與 setter 各自實作會漂移——2.0.0 首版即發生
-#       setter 驗了名稱、getter 沒驗的不對稱（Codex review 指出）。
+#       三條規則放在同一處：各自實作會漂移，驗證規則一旦不一致，
+#       setter 收下的名稱 getter 可能拒收（反之亦然）。
 #
 # 匯出：ADVISOR_CONFIG_DIR / ADVISOR_CONFIG（設定檔路徑）
 #       valid_name / scan_supported / is_supported / read_enabled / join_names

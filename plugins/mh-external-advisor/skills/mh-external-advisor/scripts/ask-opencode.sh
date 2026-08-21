@@ -58,10 +58,7 @@ if [ -z "$PROMPT" ] && [ ! -t 0 ]; then PROMPT="$(cat)"; fi
 [ -n "$PROMPT" ] || { echo "錯誤：缺少 prompt（參數或 stdin 傳入）" >&2; exit 2; }
 
 # ── 共用旗標：自動核可權限（本環境定位為外部沙箱）、輸出 NDJSON 事件流 ──
-# DECISION: 免互動旗標以 --help 偵測而非 hardcode 或版本號推斷——公開名依版本而異：
-#           1.17.10 為 --dangerously-skip-permissions，約 1.17.12 起更名 --auto、舊名轉
-#           hidden 相容別名（仍有效但不列 help，上游可能隨時移除）；能力偵測不受版本字串、
-#           downstream build 影響，且在送出 prompt 前就失敗
+# DECISION: 未採 hardcode 旗標名，因公開名依版本更名，偵測才能在送出前失敗
 # 順序跟隨 help 中的公開名（--auto 在前），兩者皆用邊界比對：子字串比對會誤中 --autoupdate，
 # 也會在 help 說明文字提及舊名時選到即將消失的別名
 if ! RUN_HELP="$(opencode run --help 2>&1)"; then
@@ -84,22 +81,31 @@ LOG="$(mktemp)"; ERR="$(mktemp)"
 trap 'rm -f "$LOG" "$ERR"' EXIT
 
 # 失敗診斷：opencode 把錯誤原因放在 stdout 的 error 事件（實測 1.18.18，stderr 可能全空），
-# 故三處都印：解析出的錯誤訊息 + stderr 尾 + stdout 尾
+# 故印錯誤訊息 + 事件型別序列 + stderr。不倒 stdout 原文——NDJSON 一則事件即一行，
+# 而 text 事件內含回覆片段，以「行」設限等於不設限，回覆會滲進呼叫端的錯誤日誌
+DIAG_BYTES=800
+DIAG_EVENTS=20
 diag() {
-  local msg
+  local msg types
   msg="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
     | map(select(.type=="error") | .error | .data.message // .message // .name // empty)
     | last // empty' "$LOG" 2>/dev/null)"
   [ -n "$msg" ] && echo "opencode 錯誤事件：$msg"
-  echo "stderr 末幾行："; tail -5 "$ERR"
-  echo "stdout 末幾行："; tail -5 "$LOG"
+  types="$(jq -Rrs --argjson n "$DIAG_EVENTS" 'split("\n") | map(fromjson? // empty)
+    | map(.type // empty) | (if length > $n then ["…"] + .[-$n:] else . end)
+    | join(" → ")' "$LOG" 2>/dev/null)"
+  if [ -n "$types" ]; then
+    echo "opencode 事件序列：$types"
+  else
+    echo "opencode stdout 末 ${DIAG_BYTES} bytes（非 NDJSON 或全空）："; tail -c "$DIAG_BYTES" "$LOG"; echo
+  fi
+  echo "opencode stderr 末 ${DIAG_BYTES} bytes："; tail -c "$DIAG_BYTES" "$ERR"
 }
 
 # ── 執行 Opencode ──
 # opencode 的 prompt 走命令列引數（其 run 子命令非以 stdin 收 prompt）；
 # prompt 前加 `--` 分隔符，防止以 `-` 開頭的 prompt 被誤解析為旗標（實測支援）
-# DECISION: resume 失敗不自動改開新 session 重送——prompt 可能含有副作用指示，
-#           自動重送有重複執行風險；改以 exit 3 讓呼叫端自行決定是否重送
+# DECISION: 未採失敗自動開新重送，因 prompt 含副作用指示時會重複執行
 if [ -n "$RESUME" ]; then
   opencode "${COMMON[@]}" --session "$RESUME" -- "$PROMPT" >"$LOG" 2>"$ERR"
   if [ $? -ne 0 ]; then
@@ -124,7 +130,7 @@ ANSWER="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
 SID="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
   | map(.sessionID // empty) | map(select(. != "")) | first // empty' "$LOG")"
 # 輸出契約防護：id 必須是單行可見字元，否則末行標記會被撐成多行或被偽造
-# DECISION: 不比照 agy 的嚴格字元集、且驗證擺在 RESUME 沿用之前——理由同 ask-codex.sh
+# DECISION: 未採嚴格字元集與先沿用後驗證，因理由同 ask-codex.sh
 if [ -n "$SID" ] && ! [[ "$SID" =~ ^[[:graph:]]+$ ]]; then SID=""; fi
 # resume 時若事件未帶合格 id，沿用傳入的 RESUME 以維持延續性
 if [ -n "$RESUME" ] && [ -z "$SID" ] && [[ "$RESUME" =~ ^[[:graph:]]+$ ]]; then SID="$RESUME"; fi

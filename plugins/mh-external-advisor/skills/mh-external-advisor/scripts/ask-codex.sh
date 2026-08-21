@@ -57,31 +57,47 @@ if [ -z "$PROMPT" ] && [ ! -t 0 ]; then PROMPT="$(cat)"; fi
 [ -n "$PROMPT" ] || { echo "錯誤：缺少 prompt（參數或 stdin 傳入）" >&2; exit 2; }
 
 # ── 共用旗標 ──
-# DECISION: 保留 --dangerously-bypass-approvals-and-sandbox——本 workspace 定位為
-#           外部沙箱環境（容器/受控主機），諮詢型呼叫需免互動核可才能自動化；
-#           若移作他用，呼叫端應自行評估此預設
+# DECISION: 未採預設安全模式，因諮詢型呼叫需免互動核可才能自動化
 COMMON=(--json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check)
 
 # 暫存 stdout / stderr：stdout 供解析，stderr 供失敗診斷（不吞掉）
 LOG="$(mktemp)"; ERR="$(mktemp)"
 trap 'rm -f "$LOG" "$ERR"' EXIT
 
+# 失敗診斷：只印事件型別序列與 stderr，不倒 stdout 原文——NDJSON 一則事件即一行，
+# 而 agent_message 事件內含完整回覆，以「行」設限等於不設限，回覆會滲進呼叫端的錯誤日誌。
+# 型別序列本身不含內容，卻能看出執行走到哪一步（實測成功序列：thread.started → turn.started
+# → item.completed → turn.completed；resume 失效時 stdout 全空、錯誤只在 stderr）
+DIAG_BYTES=800
+DIAG_EVENTS=20
+diag() {
+  local types
+  types="$(jq -Rrs --argjson n "$DIAG_EVENTS" 'split("\n") | map(fromjson? // empty)
+    | map(.type // empty) | (if length > $n then ["…"] + .[-$n:] else . end)
+    | join(" → ")' "$LOG" 2>/dev/null)"
+  if [ -n "$types" ]; then
+    echo "codex 事件序列：$types"
+  else
+    echo "codex stdout 末 ${DIAG_BYTES} bytes（非 NDJSON 或全空）："; tail -c "$DIAG_BYTES" "$LOG"; echo
+  fi
+  echo "codex stderr 末 ${DIAG_BYTES} bytes："; tail -c "$DIAG_BYTES" "$ERR"
+}
+
 # ── 執行 Codex ──
 # prompt 走 stdin（`-`），避免長字串/特殊字元的引號轉義問題
-# DECISION: resume 失敗不自動改開新對話重送——prompt 可能含有副作用指示，
-#           自動重送有重複執行風險；改以 exit 3 讓呼叫端自行決定是否重送
+# DECISION: 未採失敗自動開新重送，因 prompt 含副作用指示時會重複執行
 if [ -n "$RESUME" ]; then
   printf '%s' "$PROMPT" | codex exec resume "${COMMON[@]}" "$RESUME" - >"$LOG" 2>"$ERR"
   if [ $? -ne 0 ]; then
-    { echo "錯誤：resume 失敗（對話可能已失效）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。stderr 末幾行："
-      tail -5 "$ERR"; } >&2
+    { echo "錯誤：resume 失敗（對話可能已失效）。確認無重複執行疑慮後，可不帶 -r 重送以開新對話。"
+      diag; } >&2
     exit 3
   fi
 else
   printf '%s' "$PROMPT" | codex exec "${COMMON[@]}" - >"$LOG" 2>"$ERR"
   # 開新失敗：CLI 非零即停，不信任部分輸出（可能是被中斷的殘缺回覆）
   if [ $? -ne 0 ]; then
-    { echo "錯誤：codex 執行失敗。stderr 末幾行："; tail -5 "$ERR"; } >&2
+    { echo "錯誤：codex 執行失敗。"; diag; } >&2
     exit 1
   fi
 fi
@@ -97,17 +113,15 @@ TID="$(jq -Rrs 'split("\n") | map(fromjson? // empty)
   | map(select(.type=="thread.started") | .thread_id // empty)
   | first // empty' "$LOG")"
 # 輸出契約防護：id 必須是單行可見字元，否則末行標記會被撐成多行或被偽造
-# DECISION: 不比照 agy 的 ^[A-Za-z0-9-]+$ 嚴格字元集——agy 的 id 是自行推測的目錄名需防污損，
-#           此處 id 由 CLI 自己的 JSON 欄位給出，過嚴會在上游改格式時誤殺
+# DECISION: 未採 agy 的嚴格字元集，因此處 id 不觸及檔案系統，過嚴會誤殺
 if [ -n "$TID" ] && ! [[ "$TID" =~ ^[[:graph:]]+$ ]]; then TID=""; fi
 # resume 時若事件未重印 id（或重印的不合格），沿用傳入的 RESUME 以維持延續性
-# DECISION: 驗證擺在沿用之前——反過來的話，一個格式壞掉的新 id 會佔住 TID 而擋掉
-#           本來有效的 RESUME，讓一段還活著的對話被誤報為不可延續
+# DECISION: 未採先沿用後驗證，因壞格式的新 id 會擋掉本來有效的 RESUME
 if [ -n "$RESUME" ] && [ -z "$TID" ] && [[ "$RESUME" =~ ^[[:graph:]]+$ ]]; then TID="$RESUME"; fi
 
 # ── 輸出：回覆 + 供延續的 session id；失敗時連 stderr 一起印出供診斷 ──
 if [ -z "$ANSWER" ]; then
-  { echo "錯誤：Codex 無回覆。stderr 末幾行："; tail -5 "$ERR"; echo "stdout 末幾行："; tail -5 "$LOG"; } >&2
+  { echo "錯誤：Codex 無回覆。"; diag; } >&2
   exit 1
 fi
 printf '%s\n' "$ANSWER"

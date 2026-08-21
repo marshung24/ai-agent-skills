@@ -126,7 +126,7 @@ ask-<ai>.sh --info                               # 印自述（供 getter 組裝
 | exit 4（`advisor-list.sh`） | 尚未啟用任何顧問——請使用者跑 `advisor-set.sh <ai>...`。設定檔不存在、格式污損、清單為空皆回此碼；污損時 stderr 另有 `[warn]` |
 | exit 127 | 對應 CLI 或 `jq` 未安裝／不在 PATH；opencode 另可能是 `run --help` 執行失敗（CLI 損壞／環境異常）或免互動旗標偵測失敗（升版更名），以 `opencode run --help` 確認 |
 | exit 3 | 看 stderr 區分：暫時性錯誤 → 同 id 重試；id 確實失效 → 確認無重複執行疑慮後不帶 `-r` 重送 |
-| 無回覆、exit 1 | 看 stderr 印的 CLI stderr／stdout 末段；確認 CLI 已登入 |
+| 無回覆、exit 1 | 看 stderr 印的錯誤訊息與事件序列（stdout 原文僅在無法解析時才 byte 設限印出）；確認 CLI 已登入 |
 | resume 沒記得前文 | 確認帶的 `-r <id>` 是上一次輸出末行那個 id |
 | resume 接到不相干脈絡 | 用了「有效但屬別段」的 id（script 偵測不到）；不確定歸屬就別延續，開新並附齊背景 |
 | stdout 沒有 session_id 行 | 見 stderr 的 `[warn]`——本段對話無法延續 |

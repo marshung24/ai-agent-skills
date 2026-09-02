@@ -1,6 +1,6 @@
 # mh-external-advisor
 
-> **版本**：2.2.0｜**更新日期**：2026-08-21
+> **版本**：2.3.0｜**更新日期**：2026-09-02
 
 外部顧問：把另一個 AI CLI（Codex、Claude、Opencode 或 Antigravity）當顧問諮詢——非互動送出 prompt、取回回覆，並以明確 id 延續同一段對話，用於第二意見、交叉驗證、盲點檢查等需要異質觀點的場景。
 
@@ -12,6 +12,7 @@ mh-external-advisor/
 ├── scripts/
 │   ├── advisor-list.sh      # getter：列出已啟用的顧問與其呼叫式
 │   ├── advisor-set.sh       # setter：設定啟用清單（耐久儲存）
+│   ├── advisor-quota.sh     # 查各顧問的訂閱額度餘量（只查額度，不諮詢）
 │   ├── lib/enabled-io.sh    # getter/setter 共用：名稱驗證、支援掃描、設定檔讀取
 │   ├── ask-codex.sh         # 詢問 Codex（codex exec）
 │   ├── ask-claude.sh        # 詢問 Claude（claude -p）
@@ -37,12 +38,15 @@ scripts/ask-codex.sh "幫我看這段邏輯有沒有問題：…"
 scripts/ask-codex.sh -r <id> "那如果併發呼叫呢？"
 ```
 
+想確認顧問還剩多少訂閱額度：`scripts/advisor-quota.sh [<ai>...]`——走各 CLI 官方的非互動額度介面，只查額度、不諮詢、不消耗額度（opencode 無此介面）。
+
 四支 `ask-*.sh` 介面相同（`[-r <session_id>] [--] "<prompt>"`、末行印 id；prompt 以 `-` 開頭時必加 `--`）。id 的嚴謹擷取（末行比對、exit code 與 `[warn]` 檢查）與其他細節見 [references/detail.md](references/detail.md)。
 
 ## 需求
 
 - `codex` / `claude` / `opencode` / `agy` CLI 已安裝、登入且在 PATH（只需安裝要用的那個）
 - `jq`（各腳本皆需：解析 CLI 的 JSON 輸出與啟用清單設定檔）
+- GNU `timeout`（僅 `advisor-quota.sh` 需要；macOS 安裝 coreutils 後為 `gtimeout`，腳本兩者皆認）
 
 ## 啟用清單
 

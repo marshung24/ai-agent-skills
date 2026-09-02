@@ -54,6 +54,7 @@
 **分層原則**：
 - **清單層與諮詢層分離**：呼叫端第一步一律走 getter，清單與呼叫式為執行期資料（§5.8）；adapter 只管單次諮詢，不知道也不在乎自己有沒有被啟用
 - **adapter 骨架一致**：第 0–3、7 步四支 script 相同（統一外殼）；第 4 步（resume 前置驗證）僅 agy 有，第 5–6 步（呼叫方式與解析）依 CLI 而異，exit 3 語意與 id 缺失原因也有 agy 明示例外（見 detail.md exit code 表）。修改統一行為時四支需同步，但同步時勿抹平 adapter 特例
+- **額度查詢不在諮詢路徑上**：`advisor-quota.sh` 不經 getter、也不透過 adapter 諮詢（只借其 `--info` 首行當標頭），直接走各 CLI 官方的額度介面；它是「還要不要再問一輪」的決策輔助，缺它不影響諮詢
 - **新增 adapter 的唯一動作**：放一支支援 `--info` 的 `ask-<name>.sh` 進 `scripts/`——支援清單由檔案系統決定，getter／setter／文件皆無需登錄
 
 **文件同步點**（detail.md 的「設計取捨」節是本文 §5 的使用面摘要，屬明文接受的重複；改版時依此清單同步）：
@@ -64,6 +65,7 @@
 - exit code 契約：detail.md 表為 SSOT，SKILL.md 只留摘要、腳本 header 同步
 - **清單腳本 rc=0／rc=4 的分支**：SKILL.md 使用方式、detail.md 清單腳本節（SSOT）、本文 §5.8
 - **「有效 id 三判準」**：SKILL.md 取得延續用的 id（判準）、detail.md 擷取範例（寫法），兩者形狀不同、不得互抄
+- **額度查詢**：SKILL.md 查額度小節（用法與結束碼摘要）、detail.md 額度查詢節（SSOT，含各家介面與欄位）、本文 §5.12（為何是這三個介面）
 - **送出端規則**：SKILL.md 送出前兩條硬規則（副作用權限、預設背景）、detail.md 送出 prompt 的實務與背景執行節（需判斷、失效可逆的部分）、本文 §5.11。分界是「能寫成硬規則**且**每次諮詢都適用」——改版時勿把 detail.md 的判斷型內容升進 SKILL.md，那會稀釋守門條款
 
 > 只有一份的東西不列在此：id 擷取範例僅存在 detail.md（README 只指路不放程式碼），各 adapter 的呼叫式僅存在該腳本的 `--info`。這是刻意的收斂——同一份 id 擷取範例曾並存 README 與 detail.md、且不在本清單上，結果兩處給出相反指導。
@@ -197,6 +199,17 @@ agy 對無效 `--conversation <id>` 會**靜默開新對話且結束碼仍為 0*
 - **背景執行為何是硬規則**：原判準「有沒有可平行推進的工作」只衡量計算利用率，漏掉互動延遲。呼叫端即使無事可做，背景化仍讓使用者立刻取回控制權——「使用者沒被擋住發言、只是收不到回應」技術上成立，產品效果仍是對話被單向阻塞數分鐘
 - **句尾不放「背景規則見 detail.md」**：與 §2 明載的「SKILL.md 刻意不連向 detail.md」衝突——連結會讓 detail.md 每次諮詢都可能被讀進 context，而 getter 輸出末行已用絕對路徑指路。只留決策規則、不放指路
 
+### 5.12 額度查詢走官方介面，不讀私有 log、不引進第三方工具
+- **捨一**：讀 codex 的 rollout log（`~/.codex/sessions/**` 的 `token_count` 事件確實帶 `rate_limits`）。路徑、檔名與 schema 皆為非公開實作細節，且同一份 rollout 有多筆 `token_count`，還要另定何者為準
+- **捨二**：引進 CodexBar／ccusage。ccusage 讀本機 log 做歷史用量與成本估算，答不出供應商回傳的餘量與重置狀態；CodexBar 查 codex 額度走的正是本節採用的 `account/rateLimits/read`，引進它只多一層第三方 binary 的供應鏈、版本相容與容器持久化維護
+- **取**：三家官方的非互動介面——codex 走 app-server 的 JSON-RPC `account/rateLimits/read`，claude 與 agy 走 CLI 內建的 `/usage`。皆不啟動對話輪次
+- **為何不順道報單次 token 用量**：訂閱制下稀缺的是額度窗而非 token 數，且 token 數無法反推扣掉多少額度（額度按 token 成本比例扣）。單次 usage 三家 stdout 都現成，要用時再加，與本節無關
+- **必須驗證命令真的走內建路徑**：claude 認 `.num_turns == 0`、agy 認 `.command.name == "usage"`。若某版本改把 `/usage` 當一般 prompt 送進模型，回覆會是模型編出來的說法——不驗就等於把幻覺當額度，還白費一次額度
+- **codex 的 app-server 必須保持 stdin 開啟到收到回應**：stdin 一旦 EOF，它會在回應前就結束（實測無輸出），故以 fifo 持有寫端；但它也會**繼承**該寫端，只關父端等不到 EOF，會孤兒化存活到 timeout（實測），故啟動時即以 `{W}>&-` 關掉其繼承的寫端
+- **收工不主動 kill，而是關寫端後續讀至 EOF 再 `wait`**：這是為了讓結束碼可解讀——提前停讀會讓 server 寫後續通知時吃 EPIPE，主動 kill 則讓結束碼只反映自己下的訊號，兩者都會使下一條的第一道防線形同虛設。代價是 server 若不理會 EOF 會停滯至 timeout 並拒收該次回應（見已知限制）
+- **fail closed 的兩道防線**：CLI 結束碼非零一律不採信輸出，三支皆適用（半截 JSON 仍可能通過欄位檢查）；百分比先驗型別與範圍再換算（越界值會印出負數或大於 100 的假餘量，給錯數字比查不到更危險）
+- **`timeout` 列為硬依賴而非降級執行**：缺它就沒有「CLI 卡住」的止血點，且 codex 那支靠它兜住不理 EOF 的情況。跨平台（§ 既有慣例為 macOS + Ubuntu）故 `timeout`／`gtimeout` 兩名皆認，皆無即 exit 127
+
 ## 6. 驗證方式
 
 ### 6.1 端對端實測（真實 CLI、非 mock）
@@ -205,6 +218,8 @@ agy 對無效 `--conversation <id>` 會**靜默開新對話且結束碼仍為 0*
 1. **開新 + 多行回覆**：驗證 id 擷取與多行不截斷（§5.3 的回歸案例）
 2. **`-r <id>` 延續**：前一輪埋入記憶點（數字/詞），追問驗證顧問記得
 3. **失效 id**：驗證 exit 3 與診斷輸出（agy 另驗回傳 id 比對：`brain/` 存在但 agy 不認的 id → exit 3 且回覆不輸出）
+
+**額度查詢**（`advisor-quota.sh`）另實測三家皆查得餘量：codex 回 `usedPercent` 雙窗（5 小時／7 天）與 `resetsAt`，claude 回 session／週兩段文字並抽出百分比，agy 回兩組 `remaining_fraction`；三者的呼叫皆為 `num_turns=0`／不啟動 thread，未消耗額度。
 
 ### 6.2 零成本契約案例
 不觸發任何 API 呼叫、不耗 token，可隨時重跑：
@@ -220,6 +235,10 @@ agy 對無效 `--conversation <id>` 會**靜默開新對話且結束碼仍為 0*
 | setter | 覆寫／`--add` 冪等／`--remove`／`--clear` → rc 0；不支援名（`--remove` 除外，見下）、路徑蒙混、無參數、`--clear` 帶參數 → rc 2 | 全過 |
 | opencode 旗標偵測 | `run --help` 邊界比對命中公開名 `--auto`（實測 1.18.18）；`--help` 非零結束改報「能力查詢失敗」 | 通過 |
 | 設定檔健壯性 | 單項不合法只丟該項（合法項保留）；多行字串不被拆成多支；`version` 非 1／`enabled` 非陣列／非 JSON → rc 4；`--info` 非零結束碼不算可用；setter 拒收非 executable adapter | 全過 |
+| 額度查詢契約 | `advisor-quota.sh` 不支援名 → rc 2；未知選項 → rc 2；`opencode` → 明示不支援且 rc 1；CLI 不在 PATH → `[warn]` 且該支印「查詢失敗」、rc 1；`--help` → rc 0；同名重複指定只查一次 | 全過 |
+| 額度查詢依賴檢查（裁剪 PATH） | `timeout`／`gtimeout` 皆不在 PATH → 前置即 rc 127、不進查詢；僅有 `gtimeout`（macOS 情境）→ 正常查得 | 全過 |
+| 額度查詢 fail closed（PATH stub 假 CLI） | 三支各自「輸出合法 JSON 但 CLI exit 1」→ 不採信、該支失敗且 rc 1（codex 那支另驗：server 於收工後再寫一則通知不影響結束碼判讀）；`usedPercent` 為 101／-5／字串／null 與 `remaining_fraction` 為 1.5／-0.1／字串 → 全數擋下不輸出；claude 報告行 `101% used`、`89% of your usage was at >150k`、`Top skills: … 4%`、`Current session: 23% used THIS IS NOT A USAGE RECORD`（行尾未錨定時會被採信）→ 全數不採用 | 全過 |
+| 額度查詢子程序生命週期 | 查完 codex 後無 PPID=1 的殘留 `app-server`（修正前實測會孤兒化存活至 timeout） | 通過 |
 | 路徑穿越 | 設定檔含 `x/../../../evil` 之類名稱 → 被擋且未執行外部腳本 | 通過 |
 | agy brain 結構探測 | 空目錄／分層存放／路徑不存在／`dotglob` → 判為不可驗證（放行）；單層 UUID → 判為可驗證（前置檢查生效） | 全過 |
 | NDJSON 事件序列 | 正常序列如實輸出；30 則超上限截成末 20 則並前綴 `…`；空檔與非 JSON 回空字串（落 byte 設限分支） | 全過 |
@@ -237,6 +256,8 @@ agy 對無效 `--conversation <id>` 會**靜默開新對話且結束碼仍為 0*
 - 各 CLI 的事件格式為觀測所得（smoke test 確認），官方未必保證穩定；解析已以 `fromjson? // empty` 容錯，但欄位更名仍會失效
 - 無自動化測試（§6 待辦）：現有驗證為手動執行，未固化成可回歸的測試檔
 - `advisor-set.sh` 為 read-modify-write 且無鎖，**不可並行**：兩個 setter 交錯執行會互相覆蓋。不加 lock 是取捨——lock 目錄在強殺後殘留會永久卡住 setter，比競態更糟，而 setter 是使用者偶爾手動跑一次的設定指令
+- 額度查詢的 codex 那支**假設 app-server 收到 stdin EOF 會自行結束**（實測 1 秒內）：若某版本改為不理會 EOF，該支會停滯至 timeout 並拒收該次回應（fail closed，不會給錯數字）
+- 額度查詢的三個介面**皆非穩定契約**：codex 的 `app-server` 標 experimental，claude 的 `/usage` 是純文字報告（百分比靠 regex 抽），agy 的 `/usage` 雖結構化但屬內部 schema。任一改版都會讓該支查不到——腳本以 `[warn]` 明示查詢失敗（不靜默回報「無額度」），但無法自動修復
 - **三層守門全為文件約束，腳本層不設閘**：任何呼叫端直接執行 `scripts/` 下的 adapter 都能繞過啟用與授權檢查。腳本層加閘擋不住讀得懂檔案的 agent，只換來介面複雜度；改以「SKILL.md 明寫唯一入口與流程」降低誤觸——入口明確時，繞過不再是「找不到路只好猜」
 - `gemini` CLI 已汰除不納入；若未來恢復，放一支支援 `--info` 的 `ask-gemini.sh` 進 `scripts/` 即完成（§5.8 三層化後無需登錄）
 

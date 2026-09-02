@@ -173,6 +173,19 @@ plugins/mh-<name>/           # 一個 plugin＝一個 skill，marketplace 的 so
 
 > 為什麼多包一層：`source` 指向 `plugins/<name>/` 後，各 agent 的快取只會複製該 plugin 的內容（實測 508K → 64K），而不是整個 repo 複製 N 份。這也是 Claude Code 對「一個目錄一個 plugin」的標準佈局。
 
+## 專案模版
+
+- [templates/AGENTS.md](templates/AGENTS.md) — 專案根目錄 `AGENTS.md` 的萬用起手式：填滿〈專案資訊〉欄位即可用，含工作規範與結案流程（跑測試、自我 review、外部顧問 review、同步主線、發 PR）
+
+`AGENTS.md` 是 Codex、agy 與 opencode 共通的專案指令檔；**Claude Code 不讀它、只讀 `CLAUDE.md`**，因此在專案根目錄補一個 symlink，四家共用同一份：
+
+```bash
+cp templates/AGENTS.md <專案>/AGENTS.md
+cd <專案> && ln -s AGENTS.md CLAUDE.md
+```
+
+> symlink 用相對路徑（相對**連結所在目錄**解析），專案整個搬移或 clone 到別處都仍有效。
+
 ## References
 
 - [文件索引](docs/README.md) — 設計與維護文件的分工

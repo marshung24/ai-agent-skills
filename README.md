@@ -151,7 +151,7 @@ ln -s ~/.agents/skills/mh-code-review ~/.claude/skills/mh-code-review
 
 ## Contributing
 
-歡迎提交新的 skill！請參考 [template/SKILL.md](template/SKILL.md) 作為起始範本。
+歡迎提交新的 skill！最小骨架見 [basic.md](plugins/mh-agent-skills-builder/skills/mh-agent-skills-builder/templates/basic.md)；同目錄另有漸進式披露、工作流程、工具整合、帶腳本、條件分支五份進階範本，依 skill 的形狀擇一。
 
 ### 命名慣例
 

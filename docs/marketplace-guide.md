@@ -131,7 +131,7 @@ Codex 的預設掃描只認 `<plugin root>/skills/<name>/SKILL.md` 這個形狀�
 實測（`SOURCE=$PWD`、只改工作區不 commit）：
 
 ```
-✔ mars-skills is already at the latest version (61e2d14ce042).   ← 沒更新
+✔ <marketplace> is already at the latest version (61e2d14ce042).   ← 沒更新
 # commit 之後
 ✔ Plugin updated from 61e2d14ce042 to 759b7269d5d8. Restart to apply changes.
 ```
@@ -237,8 +237,11 @@ python3 -c "import json,jsonschema;jsonschema.Draft202012Validator(json.load(ope
 
 ## 相關文件
 
-- [tools/README.md](../tools/README.md) — 安裝工具的行為與設計
-- [Agent Skills 開發目標指南](./skills-development-guide.md) — skill 本身怎麼寫
-- [Claude Code：建立與發佈 plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
-- [Claude Code：Plugins reference](https://code.claude.com/docs/en/plugins-reference)
-- [Agent Skills Specification](https://agentskills.io/specification)
+- 要改安裝工具的行為、或安裝失敗要排查時 → [tools/README.md](../tools/README.md)
+- 要設計或改寫某個 `SKILL.md` 時 → [Agent Skills 開發目標指南](./skills-development-guide.md)
+
+外部規格：
+
+- 要建立或發佈另一個 marketplace 時 → [Claude Code：建立與發佈 plugin marketplace](https://code.claude.com/docs/en/plugin-marketplaces)
+- 要查證 plugin manifest 的欄位語意時 → [Claude Code：Plugins reference](https://code.claude.com/docs/en/plugins-reference)
+- 要確認 `SKILL.md` 的通用格式時 → [Agent Skills Specification](https://agentskills.io/specification)

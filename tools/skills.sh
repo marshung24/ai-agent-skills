@@ -182,7 +182,7 @@ plugin_dir() { printf '%s/plugins/%s\n' "$REPO_ROOT" "$1"; }
 # repo_skills — 列出 repo 內的 skill 名稱
 # I/O：無參數；每行一個名稱到 stdout（順序由 glob 決定，即字典序）
 # 判準與各家的掃描規則一致：plugins/<name>/skills/<name>/SKILL.md 存在才算一個 skill，
-# 因此 template/ 或未完成的目錄不會被誤認
+# 因此建到一半、缺 SKILL.md 的 plugin 目錄不會被誤認
 repo_skills() {
   local d n
   for d in "$REPO_ROOT"/plugins/*/; do

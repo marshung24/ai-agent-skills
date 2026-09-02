@@ -4,7 +4,7 @@
 
 把本 repo 的 skills 安裝到各 AI agent。每個 skill 各自是一個 plugin，`install` 與 `remove` 會跳選單讓你挑；每個 agent 的安裝方式則是固定的，並在安裝前偵測另一種機制的殘留以免重複載入。
 
-manifest 本身的設計見 [Marketplace 設定指南](../docs/marketplace-guide.md)。
+只有要改 manifest、plugin 佈局、欄位取捨或下架 plugin 時，才需要讀 [Marketplace 設定指南](../docs/marketplace-guide.md)——本檔只講工具怎麼用這份 manifest，不重述它的設計理由。
 
 ## 安裝方式（per-agent 固定，沒有選項）
 

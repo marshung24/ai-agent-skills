@@ -40,6 +40,8 @@ scripts/ask-codex.sh -r <id> "那如果併發呼叫呢？"
 
 想確認顧問還剩多少訂閱額度：`scripts/advisor-quota.sh [<ai>...]`——走各 CLI 官方的非互動額度介面，只查額度、不諮詢、不消耗額度（opencode 無此介面）。
 
+**顧問用哪個模型**：四支 adapter 皆不帶模型參數，一律走各 CLI 自身的預設模型。本 skill 的價值來自使用別種 AI 的能力與觀點，而非挑選特定模型；需要換模型時，請先以互動模式開啟該 CLI 調整其預設，之後的諮詢即沿用。
+
 四支 `ask-*.sh` 介面相同（`[-r <session_id>] [--] "<prompt>"`、末行印 id；prompt 以 `-` 開頭時必加 `--`）。id 的嚴謹擷取（末行比對、exit code 與 `[warn]` 檢查）與其他細節見 [references/detail.md](references/detail.md)。
 
 ## 需求

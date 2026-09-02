@@ -20,6 +20,38 @@
 - `--add`／`--remove` 讀既有清單時，會一併清掉「已無對應 adapter」的殘留名稱並警告——避免使用者移除某支後，設定檔裡的舊名一直跟著被寫回
 - `--remove` 的參數**只驗字元集、不驗支援清單**（其餘模式驗兩者，不支援即 exit 2）：adapter 被移除後，其名稱可能仍留在設定檔裡，若比照他模式擋下就會變成「移不掉」
 
+## 額度查詢
+
+`advisor-quota.sh [<ai>...]`：查各顧問的訂閱額度餘量。可一次帶多支，無參數則查已啟用的全部；帶名稱時**只驗支援清單、不要求已啟用**（使用者明確點名者即查）。
+
+| 結束碼 | 意義 |
+|--------|------|
+| 0 | 至少一支查得餘量 |
+| 1 | 全數查不到或皆不支援 |
+| 2 | 參數錯誤（名稱不在支援清單） |
+| 4 | 尚未啟用任何顧問（僅無參數時） |
+| 127 | 缺依賴（`jq` 或 GNU `timeout`／`gtimeout` 未安裝，或暫存目錄無法建立） |
+
+- 單支失敗只在 stderr 印 `[warn]` 並續查其餘支，stdout 該支位置印「查詢失敗（詳見 stderr）」——一支查不到不影響其他支的結果
+- 統一表述為**剩餘百分比**（codex／claude 原生給的是已用百分比，腳本換算）。窗口長度各家不同，**跨顧問不可直接比較**
+- 標頭沿用 `ask-<ai>.sh --info` 的首行，顯示名不在本腳本另立一份
+
+| | 額度介面 | 欄位 | 消耗 |
+|---|---|---|---|
+| codex | `codex app-server` 的 JSON-RPC `account/rateLimits/read` | `rateLimits.primary`／`.secondary` 的 `usedPercent`、`windowDurationMins`、`resetsAt`（epoch）；另有 `planType` 與 `rateLimitResetCredits.availableCount` | 不啟動 thread／turn |
+| claude | `claude -p --output-format json '/usage'` | `.result` 純文字報告，逐行抽 `N% used` 與 `resets …` | `num_turns=0` |
+| agy | `agy --output-format json -p '/usage'` | `.command.data.groups[].buckets[]` 的 `remaining_fraction`、`reset_time` | `num_turns=0` |
+| opencode | 無 | — | — |
+
+- codex 的 app-server **stdin 一旦 EOF 就會在回應前結束**，故以 fifo 持有寫端保持連線，讀到 `.id == 2` 的回應才關寫端。它會繼承腳本開的 fifo 寫端，只關父端等不到 EOF、會孤兒化存活到 timeout（實測），故啟動時即以 `{W}>&-` 關掉其繼承的寫端
+- 關寫端後**續讀 stdout 至 EOF 再 `wait`**，不主動 `kill`：提前停讀會讓 server 寫後續通知時吃 EPIPE，主動 kill 則讓結束碼只反映自己下的訊號——兩者都會讓下方的結束碼防線失去意義
+- codex 的 stdout 夾雜 `configWarning`、`remoteControl/status/changed` 等通知，不可只取首行；id 要認 JSON 欄位而非字串片段（`"id": 2` 的空白變體會漏判、`"id":20` 會誤判）
+- **CLI 結束碼非零一律不採信其輸出**（與 `ask-*.sh` 同原則，三支皆適用；codex 取的是 app-server 自行結束的碼）：半截或殘缺輸出仍可能通過欄位檢查，先看結束碼再解析
+- **百分比先驗型別與範圍再換算**：codex 的 `usedPercent` 須為 0–100 的數值、agy 的 `remaining_fraction` 須為 0–1、claude 的報告行須整行錨定為 `標籤: N% used` 且 N ≤ 100。越界值換算後會印出負數或超過 100 的假餘量——給錯數字比查不到更危險
+- claude／agy 走的是 CLI **內建的 `/usage` 命令**，不是模型推論——腳本必須驗證這點（claude 認 `.num_turns == 0`、agy 認 `.command.name == "usage"`）：若該版本改把 `/usage` 當一般 prompt 送進模型，回覆會是模型編出來的說法，且白白吃掉一次額度
+- 額度查詢**不加免互動核可旗標**（與 `ask-*.sh` 不同）：查額度不執行任何工具，不需要放權
+- 額度查詢不讀任何 CLI 的私有 session log（codex 的 `~/.codex/sessions/**` rollout log 雖也含 `rate_limits`，但路徑與 schema 非公開契約，見 design.md §5.12）
+
 ## 輸出契約
 
 四支腳本對呼叫端暴露一致介面（內部實作各異；agy 與「id 缺失」為明示例外）：
@@ -123,8 +155,9 @@ ask-<ai>.sh --info                               # 印自述（供 getter 組裝
 
 | 症狀 | 檢查 |
 |------|------|
+| 額度查詢回「查詢失敗」 | 看 stderr 的 `[warn]`：CLI 未安裝、未登入，或該版本已改變 `/usage`／app-server 行為（腳本會擋下不可信的回覆，不會把模型編的說法當額度） |
 | exit 4（`advisor-list.sh`） | 尚未啟用任何顧問——請使用者跑 `advisor-set.sh <ai>...`。設定檔不存在、格式污損、清單為空皆回此碼；污損時 stderr 另有 `[warn]` |
-| exit 127 | 對應 CLI 或 `jq` 未安裝／不在 PATH；opencode 另可能是 `run --help` 執行失敗（CLI 損壞／環境異常）或免互動旗標偵測失敗（升版更名），以 `opencode run --help` 確認 |
+| exit 127 | 對應 CLI 或 `jq` 未安裝／不在 PATH（`advisor-quota.sh` 另需 GNU `timeout`／`gtimeout`）；opencode 另可能是 `run --help` 執行失敗（CLI 損壞／環境異常）或免互動旗標偵測失敗（升版更名），以 `opencode run --help` 確認 |
 | exit 3 | 看 stderr 區分：暫時性錯誤 → 同 id 重試；id 確實失效 → 確認無重複執行疑慮後不帶 `-r` 重送 |
 | 無回覆、exit 1 | 看 stderr 印的錯誤訊息與事件序列（stdout 原文僅在無法解析時才 byte 設限印出）；確認 CLI 已登入 |
 | resume 沒記得前文 | 確認帶的 `-r <id>` 是上一次輸出末行那個 id |

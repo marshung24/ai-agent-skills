@@ -53,6 +53,19 @@
 - NDJSON 一律 slurp 整檔後在 jq 內取值（多行文字安全；**不可**對 jq 輸出行用 `tail`/`head` 取「最後一則」，會截斷多行回覆）
 - NDJSON 逐行以 `fromjson? // empty` 容錯（會夾雜非 JSON 警告行）
 
+## 節流的內部行為
+
+使用面（`--scope`、exit 5、`advisor-throttle.sh` 的子命令）見 detail.md〈節流〉；以下是 `lib/throttle-io.sh` 的實作細節。
+
+- **身分**：沿祖先鏈取第一個非 shell 祖先（只跳過 `sh`／`bash`／`zsh`／`dash`／`ksh`／`fish`），最多追 20 層。🚫 不以已知 CLI 名單比對——名單會過期，且 `node` 本身可能就是 agent 本體。追到 PID 0／1 代表中間沒有可辨識的 agent，視為解析失敗
+- **incarnation key**：`ps -o lstart=`（Linux／macOS 皆有）。桶檔內存 lstart，不符即視為 PID 已被重用、舊桶失效。🚫 不用 `/proc/<pid>/stat`（Linux only）——這裡不是安全身分驗證，秒級足夠
+- **狀態**：`${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/buckets/<pid>/<advisor>-<scope>.json`。水位用整數單位（`capacity` 30／`cost` 10／每 `refill_seconds` 回 1）；`refill_seconds` 存「上次生效」的恢復秒數
+- **計算順序**：舊 `refill` 排水 → 判斷 → 寫回時才換成新 `refill`。`elapsed` 為負（時鐘倒退、NTP 校時）取 0 並警告，🚫 不得反向增加水位
+- **鎖**：每桶一個 `mkdir` 目錄鎖（macOS 無 `flock`）。owner 檔存 PID／lstart／nonce／建立時間；回收 stale 鎖先原子 `mv` 成唯一名再刪，避免兩個等待者同時拆鎖；解鎖前比對 nonce，防被回收的舊 owner 刪掉後來者的鎖。`ps` 查不到（回 2）時**不**回收——誤刪比多等昂貴；另設「鎖存在超過 12 倍逾時」的保底回收，避免永久鎖死
+- **額度查詢一律在鎖外**：它走網路要數秒，持鎖期間查會阻塞同桶所有背景諮詢。快取按顧問名分開，TTL 5 分鐘、失敗沿用舊值至多 30 分鐘
+- **GC**：取用時至多觸發一次、間隔 6 小時；只清 lstart 不符或超過 7 天的桶。`ps` 暫時失敗不得據以刪除；GC 失敗只警告
+- **peek 不寫檔**：投影公式對同一時間點冪等，唯讀查詢不必改 `updated_at`
+
 ## 設計取捨（DECISION）
 
 以下是使用面摘要，完整理由與證據鏈見 [design.md](design.md) §5。

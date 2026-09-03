@@ -7,14 +7,17 @@
 #
 # I/O：
 #   輸入  ─ 無參數：查已啟用的全部顧問；帶 <ai>… 則只查指定的（須在支援清單內）
+#           --min-remain：改印機器可讀的單一數字（見下），供腳本取用
 #   輸出  ─ stdout：逐支的額度窗餘量與重置時間；不支援者明示不支援
+#           --min-remain 模式：只印所有查得額度窗中的**最小**剩餘百分比（整數），無其他文字
 #           stderr：警告（查詢失敗、輸出格式不符預期等，一律 [warn] 前綴）
 #   結束碼─ 0 至少一支查得餘量；1 全數查不到或皆不支援；2 參數錯誤；
 #           4 尚未啟用任何顧問；127 缺依賴
 #
 # 用法：
-#   advisor-quota.sh              # 已啟用的全部
-#   advisor-quota.sh codex agy    # 指定幾支
+#   advisor-quota.sh                        # 已啟用的全部
+#   advisor-quota.sh codex agy              # 指定幾支
+#   advisor-quota.sh --min-remain codex     # 只印最小剩餘百分比（供節流等機器取用）
 
 # 不用 set -e：單支查詢失敗是正常分支（其餘支仍要查完），不可讓非零結束碼直接中止
 set -uo pipefail
@@ -42,9 +45,14 @@ trap 'rm -rf "$TMPD"' EXIT
 
 # ── 說明與參數解析 ──
 usage() {
-  echo "用法: $0 [<ai>...]"
+  echo "用法: $0 [--min-remain] [<ai>...]"
   echo "  無參數：查已啟用的全部顧問；可一次帶多支，只查指定的那幾支"
+  echo "  --min-remain：只印所有查得額度窗中最小的剩餘百分比（整數），供腳本取用"
 }
+# 取最小而非平均或首個：最緊的那個窗才是實際可用量——7 天窗還很滿、5 小時窗已見底時，
+# 用其他取法會高估餘量
+MIN_MODE=0
+if [ "${1:-}" = "--min-remain" ]; then MIN_MODE=1; shift; fi
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
   -*) echo "錯誤：未知選項「$1」" >&2; usage >&2; exit 2 ;;
@@ -101,8 +109,14 @@ fmt_window() {
 }
 
 # 印一個額度窗：統一表述為「剩餘百分比」，各 CLI 的已用／剩餘差異在呼叫端消化
+MIN_REMAIN=""
 put_window() {
   local label="$1" remain="$2" reset="$3"
+  # 各 CLI 的百分比可能帶小數，bash 不做浮點比較，交給 awk
+  if [ -z "$MIN_REMAIN" ] || awk -v a="$remain" -v b="$MIN_REMAIN" 'BEGIN{exit !(a+0 < b+0)}'; then
+    MIN_REMAIN="$remain"
+  fi
+  [ "$MIN_MODE" -eq 1 ] && return 0
   if [ -n "$reset" ]; then
     printf '  %s：剩 %s%%（重置 %s）\n' "$label" "$remain" "$reset"
   else
@@ -240,6 +254,8 @@ quota_agy() {
 
 # ── 主流程：逐支查詢，單支失敗只警告不中斷 ──
 OK=0
+# --min-remain 只要一個數字：把人類可讀輸出整段導掉，比在每個 printf 加分支不易漏
+[ "$MIN_MODE" -eq 1 ] && exec 3>&1 1>/dev/null
 printf '外部顧問額度（%s 支）：\n\n' "${#TARGETS[@]}"
 for name in "${TARGETS[@]}"; do
   # 標頭沿用 adapter 自述首行，顯示名不在本腳本另立一份（避免與 getter 漂移）
@@ -259,8 +275,19 @@ for name in "${TARGETS[@]}"; do
   echo
 done
 
+[ "$MIN_MODE" -eq 1 ] && exec 1>&3 3>&-
+
 # 全數查不到：等同沒有可用結果，讓呼叫端據結束碼分流，不必去 parse stdout
 if [ "$OK" -eq 0 ]; then
   echo "[warn] 沒有任何顧問回報額度" >&2
   exit 1
+fi
+
+# 取得結果但一個窗都沒解析出來時不輸出殘缺值：呼叫端據 exit 1 走自己的退化路徑
+if [ "$MIN_MODE" -eq 1 ]; then
+  if [ -z "$MIN_REMAIN" ]; then
+    echo "[warn] 查得回應但未解析出任何額度窗" >&2
+    exit 1
+  fi
+  printf '%s\n' "$MIN_REMAIN"
 fi

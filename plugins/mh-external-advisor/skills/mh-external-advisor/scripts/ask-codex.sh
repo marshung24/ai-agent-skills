@@ -10,13 +10,13 @@
 #           -r <session_id>：要延續的對話（省略則開新對話）
 #   輸出  ─ stdout：Codex 回覆文字；最後一行 `[External Advisor codex session_id: <id>]`（供下次 -r 延續）
 #   結束碼─ 0 成功；2 參數錯誤；3 resume 失敗；1 執行失敗（無回覆或回覆不可採信，
-#           可能已有部分副作用）；127 缺依賴
+#           可能已有部分副作用）；5 節流擋下（prompt 未送出）；127 缺依賴
 #
 # 用法：
-#   ask-codex.sh "問題"                      # 開新對話
-#   ask-codex.sh -r <session_id> "追問"        # 延續指定對話
-#   echo "很長的問題" | ask-codex.sh -r <id>  # prompt 走 stdin，免引號轉義
-#   ask-codex.sh -- "-開頭的問題"             # prompt 以 - 開頭時，加 -- 結束選項解析
+#   ask-codex.sh --scope explore "問題"                      # 開新對話
+#   ask-codex.sh --scope unblock -r <session_id> "追問"        # 延續指定對話
+#   echo "很長的問題" | ask-codex.sh --scope unblock -r <id>  # prompt 走 stdin，免引號轉義
+#   ask-codex.sh --scope explore -- "-開頭的問題"             # prompt 以 - 開頭時，加 -- 結束選項解析
 
 # 不用 set -e：需自行分流處理各執行失敗情境，不可讓非零結束碼直接中止
 set -uo pipefail
@@ -28,11 +28,14 @@ set -uo pipefail
 if [ "${1:-}" = "--info" ]; then
   cat <<'EOF'
 codex｜Codex
-  開新：{SELF} "問題"
-  延續：{SELF} -r <session_id> "追問"
+  開新：{SELF} --scope <explore|unblock|review> "問題"
+  延續：{SELF} --scope <explore|unblock|review> -r <session_id> "追問"
 EOF
   exit 0
 fi
+
+# 路徑自解析：以腳本自身位置為準，不信任 cwd
+SCRIPTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── 前置檢查：依賴不存在時立即明確報錯 ──
 command -v codex >/dev/null || { echo "錯誤：找不到 codex CLI，請先安裝並登入" >&2; exit 127; }
@@ -40,6 +43,21 @@ command -v jq    >/dev/null || { echo "錯誤：找不到 jq（解析輸出需�
 
 # ── 參數解析：-r <session_id> 為可選的延續目標 ──
 RESUME=""
+# ── --scope：節流用，必填。getopts 不認長選項，先摘出來 ──
+SCOPE=""
+_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --) while [ $# -gt 0 ]; do _ARGS+=("$1"); shift; done; break ;;
+    --scope) SCOPE="${2:-}"
+             [ -n "$SCOPE" ] || { echo "錯誤：--scope 缺值（explore|unblock|review）" >&2; exit 2; }
+             shift 2 ;;
+    *) _ARGS+=("$1"); shift ;;
+  esac
+done
+# 空陣列用 "${arr[@]:-}" 會展開成一個空字串參數，改用 + 形式
+set -- ${_ARGS[@]+"${_ARGS[@]}"}
+
 while getopts "r:" opt; do
   case "$opt" in
     r) RESUME="$OPTARG"
@@ -55,6 +73,19 @@ shift $((OPTIND - 1))
 PROMPT="$*"
 if [ -z "$PROMPT" ] && [ ! -t 0 ]; then PROMPT="$(cat)"; fi
 [ -n "$PROMPT" ] || { echo "錯誤：缺少 prompt（參數或 stdin 傳入）" >&2; exit 2; }
+
+# ── 節流：扣桶成功才送出 ──
+# 嵌在 adapter 內部而非交由呼叫端自行呼叫——由呼叫端決定要不要節流，等於沒有節流。
+# 任何失敗一律不送出：fail open 會讓環境差異成為繞過節流的途徑
+[ -n "$SCOPE" ] || { echo "錯誤：缺少 --scope（explore|unblock|review）" >&2; exit 2; }
+THROTTLE_OUT="$("$SCRIPTS_DIR/advisor-throttle.sh" consume --advisor codex --scope "$SCOPE")"
+case $? in
+  0) ;;
+  5) printf '%s\n' "$THROTTLE_OUT"
+     # 呼叫端最需要知道的是「要不要重送」——訊息不講，它得去翻文件才敢判斷
+     echo "錯誤：節流額度用盡，prompt 未送出（可安全重試）" >&2; exit 5 ;;
+  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 1 ;;
+esac
 
 # ── 共用旗標 ──
 # DECISION: 未採預設安全模式，因諮詢型呼叫需免互動核可才能自動化

@@ -33,6 +33,54 @@
 - 統一表述為**剩餘百分比**（codex／claude 原生給的是已用百分比，腳本換算）。窗口長度各家不同，**跨顧問不可直接比較**
 - 標頭沿用 `ask-<ai>.sh --info` 的首行，顯示名不在本腳本另立一份
 
+## 節流
+
+每次諮詢在送出 prompt 前，由 `ask-*.sh` 內部扣一次漏桶額度。桶鍵為 `(呼叫端 agent 的 PID, lstart, scope, 顧問)`——每支顧問的訂閱獨立計算，互不排擠。
+
+```
+advisor-throttle.sh status  [--advisor <ai>] [--scope <scope>]   # 唯讀投影，不查網路、不改狀態
+advisor-throttle.sh consume --advisor <ai> --scope <scope>       # 取用一次（adapter 內部使用）
+advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
+```
+
+| 結束碼 | 意義 |
+|--------|------|
+| 0 | 放行（`consume`）／查詢成功 |
+| 1 | 執行失敗：身分解析、鎖逾時、狀態寫入失敗。**prompt 未送出** |
+| 2 | 參數錯誤（含缺 `--scope`、未知 scope、不支援的顧問名） |
+| 5 | 桶滿。**prompt 未送出**，stdout 的 JSON 含 `retry_after_seconds` |
+| 127 | 缺 `jq` |
+
+- `reset` 是**使用者的管理操作**：它清空硬性節流的水位。🚫 不得由自主流程呼叫——被擋下後自行 reset 等於節流不存在
+- 身分解析失敗、鎖逾時一律 **fail closed**，且 🚫 不偽裝成桶滿（exit 5）——那會讓呼叫端誤以為等待即可
+- 額度查不到時採**最保守的半速檔**：網路故障不得成為放寬節流的途徑
+- 狀態位於 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/`，是可丟棄的執行狀態，與 `enabled.json`（使用者意圖）分開放
+- 用量記錄 `quota/usage.log` 記 allow 與 deny 兩者（只記成功就看不出節流是否真的擋到），**不記 prompt 內容**，超過 1MB 輪替
+
+### 設定檔
+
+`${XDG_CONFIG_HOME:-$HOME/.config}/mh-external-advisor/throttle.json`，**缺檔即用內建預設**；`scopes.default` 為各 scope 共用值，個別 scope 可覆寫。
+
+```json
+{
+  "version": 1,
+  "scopes": {
+    "default": { "capacity": 30, "cost": 10, "refill_seconds": 60 },
+    "review":  { "refill_seconds": 90 }
+  },
+  "quota_thresholds": { "low_below": 40, "high_at": 70 },
+  "quota_cache_ttl_seconds": 300,
+  "quota_stale_max_seconds": 1800,
+  "lock_timeout_seconds": 5,
+  "gc_interval_seconds": 21600,
+  "gc_max_age_seconds": 604800
+}
+```
+
+內建預設：**容量 30、每次扣 10、每 60 秒回 1 單位**——即 3 次 burst，用完後每 10 分鐘回一次呼叫的量。每個欄位都必須是正整數，`0`、負數、小數一律**個別退回預設並警告**：設定寫錯不該讓所有諮詢停擺（`refill_seconds` 為 0 會讓恢復量算式除以零）。
+
+`cost > capacity` 會讓該桶永遠取不到，兩者一併退回預設。這個檢查在 **`default` 與各 scope 覆寫兩層都做**——只驗 `default` 的話，單獨設 `review.capacity` 而 `cost` 沿用預設，該 scope 會每次都回 exit 5。**額度餘量只調恢復速率、不調容量**——剩餘 `<40%` 間隔加倍、`≥70%` 間隔減半；容量恆為政策上的 burst 上限，兩者一起放大會讓高餘量時的尖峰過度膨脹。
+
 ## 輸出契約
 
 四支腳本對呼叫端暴露一致介面（內部實作各異；agy 與「id 缺失」為明示例外）：
@@ -43,6 +91,7 @@
 | stderr | 警告／錯誤（含失敗時的診斷。四支一律 **byte 設限**，且**能解析時只印錯誤欄位與事件型別序列、不倒 stdout 原文**：NDJSON／單行 JSON 的一「行」可含整段回覆，以行設限等於不設限，會讓回覆滲進呼叫端的錯誤日誌。僅在 stdout 無法解析為該 CLI 的預期格式時才 byte 設限印出原文——此時它已不是正常回覆載體，而診斷正需要看見它。見 [docs/internals.md](../docs/internals.md)〈底層指令〉） |
 | exit 0 | 成功 |
 | exit 2 | 參數錯誤（缺 prompt、`-r` 的 id 為空字串等——空 id 常見於上一輪擷取失敗，若放行會靜默開新重送，故必擋） |
+| exit 5 | 節流擋下：該 scope 的桶已空，**prompt 未送出**。stdout 為 JSON，含 `retry_after_seconds` |
 | exit 3 | resume 失敗。涵蓋範圍：codex/claude/opencode＝resume 路徑上 CLI 任何非零結束（含 id 失效與暫時性錯誤，看 stderr 區分；此三支的 exit 3 一律代表 **prompt 已送出**，CLI 已跑過才判定失敗）；agy＝id 不存在（前置檢查，**prompt 未送出**），或 agy 未接上該段而另開新對話（事後比對回傳 id；此時 **prompt 已執行**、回覆不輸出，stderr 給新 id）。**有效但屬別段的 id 皆無法偵測**，會靜默接錯脈絡（防範靠呼叫端簿記，見 SKILL.md 的多段並存規則） |
 | exit 1 | 執行失敗：無回覆，或有回覆但不可採信（claude＝`is_error=true` 時錯誤文字不當回覆輸出；agy＝CLI 非零結束、輸出非合法 JSON、`status` 非 `SUCCESS`，或 `status=SUCCESS` 但 `.response` 為空，失敗原因見 stdout 的 `.error`）。**可能已產生部分副作用**，重送前先評估 |
 | exit 127 | 缺依賴（CLI 未安裝或缺 `jq`；opencode 另含「能力查詢失敗」與「偵測不到免互動旗標」——旗標名版本相依，見 [docs/internals.md](../docs/internals.md)〈底層指令〉） |
@@ -72,14 +121,15 @@ rm -f "$err"
 ## 參數
 
 ```
-ask-<ai>.sh [-r <session_id>] [--] "<prompt>"    # 四支皆同
+ask-<ai>.sh --scope <explore|unblock|review> [-r <session_id>] [--] "<prompt>"
 ask-<ai>.sh --info                               # 印自述（供 getter 組裝清單）
 ```
 
+- `--scope`：**必填**，節流用（見〈節流〉）。缺它 exit 2；`--` 之後不再解析，prompt 內容不會被誤吃
 - `-r <id>`：延續指定對話；省略則開新
 - `--info`：置於 getopts 與依賴檢查之前——長選項會讓 getopts 落入錯誤分支，且 CLI 未安裝時仍須印得出自述
 - `<prompt>`：命令列參數優先；無參數時僅在 stdin 非 TTY 才讀（互動誤用不會掛住）
-- **prompt 以 `-` 開頭時必加 `--`**（結束腳本自身的選項解析，四支皆適用）：`ask-codex.sh -- "-r 是什麼？"`；走 stdin 則無此問題
+- **prompt 以 `-` 開頭時必加 `--`**（結束腳本自身的選項解析，四支皆適用）：`ask-codex.sh --scope explore -- "-r 是什麼？"`；走 stdin 則無此問題
 - **agy 特例**：agy 對無效 id 會靜默開新對話且結束碼仍為 0，故 resume 設兩道防線——送出前檢查 `~/.gemini/antigravity-cli/brain/<id>` 目錄存在（不存在即 exit 3，prompt 未送出），送出後比對回傳的 `conversation_id` 是否等於傳入 id（不等即 exit 3 且不輸出回覆）。前置檢查僅在能確認 `brain/` 為單層 UUID 目錄結構時才擋；無法確認（路徑不存在、為空、或改為分層存放）即放行、僅靠事後比對，此時 stderr 印 `[note]` 且 **exit 3 不再保證 prompt 未送出**。
 
 ## resume 失敗行為

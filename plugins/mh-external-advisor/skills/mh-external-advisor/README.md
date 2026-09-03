@@ -13,7 +13,9 @@ mh-external-advisor/
 │   ├── advisor-list.sh      # getter：列出已啟用的顧問與其呼叫式
 │   ├── advisor-set.sh       # setter：設定啟用清單（耐久儲存）
 │   ├── advisor-quota.sh     # 查各顧問的訂閱額度餘量（只查額度，不諮詢）
+│   ├── advisor-throttle.sh  # 漏桶節流：查水位／取用額度／重置（扣桶由 ask-*.sh 內部完成）
 │   ├── lib/enabled-io.sh    # getter/setter 共用：名稱驗證、支援掃描、設定檔讀取
+│   ├── lib/throttle-io.sh   # 節流共用：身分解析、桶讀寫、目錄鎖、額度倍率
 │   ├── ask-codex.sh         # 詢問 Codex（codex exec）
 │   ├── ask-claude.sh        # 詢問 Claude（claude -p）
 │   ├── ask-opencode.sh      # 詢問 Opencode（opencode run）
@@ -36,15 +38,50 @@ scripts/advisor-set.sh codex claude
 scripts/advisor-list.sh
 
 # 3. 依 getter 給的指令諮詢；延續同一段對話帶 -r <id>（id 取自輸出末行）
-scripts/ask-codex.sh "幫我看這段邏輯有沒有問題：…"
-scripts/ask-codex.sh -r <id> "那如果併發呼叫呢？"
+scripts/ask-codex.sh --scope explore "幫我看這段邏輯有沒有問題：…"
+scripts/ask-codex.sh --scope unblock -r <id> "那如果併發呼叫呢？"
 ```
 
 想確認顧問還剩多少訂閱額度：`scripts/advisor-quota.sh [<ai>...]`——走各 CLI 官方的非互動額度介面，只查額度、不諮詢、不消耗額度（opencode 無此介面）。
 
 **顧問用哪個模型**：四支 adapter 皆不帶模型參數，一律走各 CLI 自身的預設模型。本 skill 的價值來自使用別種 AI 的能力與觀點，而非挑選特定模型；需要換模型時，請先以互動模式開啟該 CLI 調整其預設，之後的諮詢即沿用。
 
-四支 `ask-*.sh` 介面相同（`[-r <session_id>] [--] "<prompt>"`、末行印 id；prompt 以 `-` 開頭時必加 `--`）。id 的嚴謹擷取（末行比對、exit code 與 `[warn]` 檢查）與其他細節見 [references/detail.md](references/detail.md)。
+四支 `ask-*.sh` 介面相同（`--scope <explore|unblock|review> [-r <session_id>] [--] "<prompt>"`、末行印 id；`--scope` **必填**，缺它 exit 2；prompt 以 `-` 開頭時必加 `--`）。id 的嚴謹擷取（末行比對、exit code 與 `[warn]` 檢查）與其他細節見 [references/detail.md](references/detail.md)。
+
+## 節流
+
+每次諮詢在送出 prompt 前，由 `ask-*.sh` **內部**扣一次漏桶額度——不是選配步驟，跳不過。這是為了讓自主模式有一層不依賴呼叫端自我判斷的速率上限：其餘限制（該不該問、是不是同一個問題）都要 AI 自己判斷，只有這一層純粹數次數與看時鐘。
+
+桶依 `(呼叫端 agent 的 PID, scope, 顧問)` 隔離——每支顧問的訂閱額度獨立計算，互不排擠；同一台機器上多個 agent 也互不干擾。
+
+**預設**：容量 30、每次扣 10、每 60 秒回 1 單位——即連續 3 次後見底，之後每 10 分鐘回一次呼叫的量。額度餘量高時恢復更快（`>=70%` 間隔減半、`<40%` 加倍），但**容量不變**。
+
+```bash
+# 查水位（唯讀，不查網路、不建任何檔案）
+scripts/advisor-throttle.sh status --advisor codex
+
+# 重置（被擋下但你確定要繼續時）
+scripts/advisor-throttle.sh reset --advisor codex --scope explore
+scripts/advisor-throttle.sh reset --all
+```
+
+桶空時 adapter 回 **exit 5 且 prompt 未送出**，stdout 是含 `retry_after_seconds` 的 JSON。等它恢復或用 `reset` 清掉都可以——`reset` 是給你用的，AI 被擋下後不得自行呼叫。
+
+要調參數，建 `${XDG_CONFIG_HOME:-$HOME/.config}/mh-external-advisor/throttle.json`：
+
+```json
+{
+  "version": 1,
+  "scopes": {
+    "default": { "capacity": 30, "cost": 10, "refill_seconds": 60 },
+    "review":  { "refill_seconds": 90 }
+  }
+}
+```
+
+缺檔即用內建預設。每個欄位都必須是正整數，`0`、負數、小數或 `cost > capacity` 會**個別退回預設並在 stderr 印 `[warn]`**——設定寫錯不該讓所有諮詢停擺。完整欄位、結束碼與內部行為見 [references/detail.md](references/detail.md)〈節流〉。
+
+用量記錄在 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/usage.log`，allow 與 deny 都記，**不含 prompt 內容**，超過 1MB 輪替。
 
 ## 需求
 

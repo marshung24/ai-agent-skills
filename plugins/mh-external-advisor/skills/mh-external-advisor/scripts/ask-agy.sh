@@ -19,10 +19,10 @@
 #           127 缺依賴
 #
 # 用法：
-#   ask-agy.sh "問題"                      # 開新對話
-#   ask-agy.sh -r <session_id> "追問"       # 延續指定對話
-#   echo "很長的問題" | ask-agy.sh -r <id>  # prompt 走 stdin，免引號轉義
-#   ask-agy.sh -- "-開頭的問題"             # prompt 以 - 開頭時，加 -- 結束選項解析
+#   ask-agy.sh --scope explore "問題"                      # 開新對話
+#   ask-agy.sh --scope unblock -r <session_id> "追問"       # 延續指定對話
+#   echo "很長的問題" | ask-agy.sh --scope unblock -r <id>  # prompt 走 stdin，免引號轉義
+#   ask-agy.sh --scope explore -- "-開頭的問題"             # prompt 以 - 開頭時，加 -- 結束選項解析
 
 set -uo pipefail
 
@@ -33,8 +33,8 @@ set -uo pipefail
 if [ "${1:-}" = "--info" ]; then
   cat <<'EOF'
 agy｜Antigravity
-  開新：{SELF} "問題"
-  延續：{SELF} -r <session_id> "追問"
+  開新：{SELF} --scope <explore|unblock|review> "問題"
+  延續：{SELF} --scope <explore|unblock|review> -r <session_id> "追問"
 EOF
   exit 0
 fi
@@ -42,12 +42,30 @@ fi
 # agy 對話落地位置（版本相依，僅供 resume 前置檢查；不可用時自動降級，見下方檢查段）
 BRAIN="${HOME:-}/.gemini/antigravity-cli/brain"
 
+# 路徑自解析：以腳本自身位置為準，不信任 cwd
+SCRIPTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 # ── 前置檢查：依賴不存在時立即明確報錯 ──
 command -v agy >/dev/null || { echo "錯誤：找不到 agy CLI，請先安裝並登入" >&2; exit 127; }
 command -v jq  >/dev/null || { echo "錯誤：找不到 jq（解析 agy JSON 輸出需要）" >&2; exit 127; }
 
 # ── 參數解析：-r <session_id> 為可選的延續目標 ──
 RESUME=""
+# ── --scope：節流用，必填。getopts 不認長選項，先摘出來 ──
+SCOPE=""
+_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --) while [ $# -gt 0 ]; do _ARGS+=("$1"); shift; done; break ;;
+    --scope) SCOPE="${2:-}"
+             [ -n "$SCOPE" ] || { echo "錯誤：--scope 缺值（explore|unblock|review）" >&2; exit 2; }
+             shift 2 ;;
+    *) _ARGS+=("$1"); shift ;;
+  esac
+done
+# 空陣列用 "${arr[@]:-}" 會展開成一個空字串參數，改用 + 形式
+set -- ${_ARGS[@]+"${_ARGS[@]}"}
+
 while getopts "r:" opt; do
   case "$opt" in
     r) RESUME="$OPTARG"
@@ -105,6 +123,19 @@ if [ -n "$RESUME" ]; then
     echo "[note] 無法驗證 agy 儲存結構，resume 前置檢查略過；本次若 resume 失敗，prompt 已送出並執行" >&2
   fi
 fi
+
+# ── 節流：扣桶成功才送出 ──
+# 嵌在 adapter 內部而非交由呼叫端自行呼叫——由呼叫端決定要不要節流，等於沒有節流。
+# 任何失敗一律不送出：fail open 會讓環境差異成為繞過節流的途徑
+[ -n "$SCOPE" ] || { echo "錯誤：缺少 --scope（explore|unblock|review）" >&2; exit 2; }
+THROTTLE_OUT="$("$SCRIPTS_DIR/advisor-throttle.sh" consume --advisor agy --scope "$SCOPE")"
+case $? in
+  0) ;;
+  5) printf '%s\n' "$THROTTLE_OUT"
+     # 呼叫端最需要知道的是「要不要重送」——訊息不講，它得去翻文件才敢判斷
+     echo "錯誤：節流額度用盡，prompt 未送出（可安全重試）" >&2; exit 5 ;;
+  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 1 ;;
+esac
 
 # ── 共用旗標 ──
 # 注意：agy 的 -p 是「吃值」旗標（prompt 即其值），必須排在最後、prompt 緊跟其後

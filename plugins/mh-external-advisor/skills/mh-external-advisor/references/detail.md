@@ -96,7 +96,7 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
 | exit 6 | 節流檢查本身失敗（鎖逾時、桶狀態或身分解析），adapter 在啟動顧問 CLI 前退出，**prompt 未送出**。無 `retry_after_seconds`——鎖何時釋放算不出來，🚫 不得比照 exit 5 定一個等待秒數 |
 | exit 3 | resume 失敗。涵蓋範圍：codex/claude/opencode＝resume 路徑上 CLI 任何非零結束（含 id 失效與暫時性錯誤，看 stderr 區分；此三支的 exit 3 一律代表 **prompt 已送出**，CLI 已跑過才判定失敗）；agy＝id 不存在（前置檢查，**prompt 未送出**），或 agy 未接上該段而另開新對話（事後比對回傳 id；此時 **prompt 已執行**、回覆不輸出，stderr 給新 id）。**有效但屬別段的 id 皆無法偵測**，會靜默接錯脈絡（防範靠呼叫端簿記，見 SKILL.md 的多段並存規則） |
 | exit 1 | 執行失敗：無回覆，或有回覆但不可採信（claude＝`is_error=true` 時錯誤文字不當回覆輸出；agy＝CLI 非零結束、輸出非合法 JSON、`status` 非 `SUCCESS`，或 `status=SUCCESS` 但 `.response` 為空，失敗原因見 stdout 的 `.error`）。**可能已產生部分副作用**，重送前先評估——節流檢查失敗不歸這裡，那是 exit 6，只有它保證未送出 |
-| exit 127 | 缺依賴（CLI 未安裝或缺 `jq`；opencode 另含「能力查詢失敗」與「偵測不到免互動旗標」——旗標名版本相依，見 [docs/internals.md](../docs/internals.md)〈底層指令〉）。**prompt 未送出**，但 opencode 的能力查詢在扣桶之後，該兩種**已消耗節流額度**——「未送出」只保證顧問端沒有重複副作用，不保證沒扣桶 |
+| exit 127 | 缺依賴（CLI 未安裝或缺 `jq`；opencode 另含「能力查詢失敗」與「偵測不到免互動旗標」——旗標名版本相依，見 [docs/internals.md](../docs/internals.md)〈底層指令〉）。四支的依賴與能力檢查都在扣桶之前，**prompt 未送出且未扣桶** |
 
 - 輸出末行標記前一律先驗 id 格式，不合格即**視同未取得 id**（清空改印 `[warn]`，不輸出不可信的 id）：agy 用 `^[A-Za-z0-9-]+$`（其 id 會拼進 `brain/<id>` 路徑做 resume 前置檢查，須防路徑蒙混）；codex/claude/opencode 用 `^[[:graph:]]+$`（id 直接取自各 CLI 的 JSON 欄位，只擋會撐破末行契約的空白與控制字元，過嚴會在上游改格式時誤殺）
 - 成功但未取得 id 時：stdout 無 `[External Advisor ...]` 行，stderr 印 `[warn] 未取得 session_id…，本段對話無法延續`——呼叫端據此得知不可延續。**判斷一律認 `[warn]` 前綴，勿比對全文**：括號內的補充說明各腳本不同（如 agy 會註明是 `conversation_id` 格式不合法）。

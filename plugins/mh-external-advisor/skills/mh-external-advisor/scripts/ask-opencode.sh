@@ -12,8 +12,7 @@
 #   結束碼─ 0 成功；2 參數錯誤；3 resume 失敗；1 執行失敗（無回覆或回覆不可採信，
 #           可能已有部分副作用）；5 節流擋下（prompt 未送出）；
 #           6 節流檢查失敗（prompt 未送出）；
-#           127 缺依賴（CLI/jq 未安裝、能力查詢失敗，或偵測不到免互動旗標。
-#               後兩者在扣桶之後，prompt 未送出但已消耗節流額度）
+#           127 缺依賴（CLI/jq 未安裝、能力查詢失敗，或偵測不到免互動旗標）
 #
 # 用法：
 #   ask-opencode.sh --scope explore "問題"                      # 開新 session
@@ -76,22 +75,12 @@ shift $((OPTIND - 1))
 PROMPT="$*"
 if [ -z "$PROMPT" ] && [ ! -t 0 ]; then PROMPT="$(cat)"; fi
 [ -n "$PROMPT" ] || { echo "錯誤：缺少 prompt（參數或 stdin 傳入）" >&2; exit 2; }
-
-# ── 節流：扣桶成功才送出 ──
-# 嵌在 adapter 內部而非交由呼叫端自行呼叫——由呼叫端決定要不要節流，等於沒有節流。
-# 任何失敗一律不送出：fail open 會讓環境差異成為繞過節流的途徑
+# 參數錯誤（exit 2）一律先於能力查詢與扣桶，與其他三支一致
 [ -n "$SCOPE" ] || { echo "錯誤：缺少 --scope（explore|unblock|review）" >&2; exit 2; }
-THROTTLE_OUT="$("$SCRIPTS_DIR/advisor-throttle.sh" consume --advisor opencode --scope "$SCOPE")"
-case $? in
-  0) ;;
-  5) printf '%s\n' "$THROTTLE_OUT"
-     # 呼叫端最需要知道的是「要不要重送」——訊息不講，它得去翻文件才敢判斷
-     echo "錯誤：節流額度用盡，prompt 未送出（可安全重試）" >&2; exit 5 ;;
-  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 6 ;;
-esac
 
 # ── 共用旗標：自動核可權限（本環境定位為外部沙箱）、輸出 NDJSON 事件流 ──
 # DECISION: 未採 hardcode 旗標名，因公開名依版本更名，偵測才能在送出前失敗
+# 擺在扣桶前：能力不成立就送不出去，先扣桶等於拿額度換一個必然失敗的呼叫
 # 順序跟隨 help 中的公開名（--auto 在前），兩者皆用邊界比對：子字串比對會誤中 --autoupdate，
 # 也會在 help 說明文字提及舊名時選到即將消失的別名
 if ! RUN_HELP="$(opencode run --help 2>&1)"; then
@@ -108,6 +97,18 @@ else
   exit 127
 fi
 COMMON=(run "$AUTO_FLAG" --format json)
+
+# ── 節流：扣桶成功才送出 ──
+# 嵌在 adapter 內部而非交由呼叫端自行呼叫——由呼叫端決定要不要節流，等於沒有節流。
+# 任何失敗一律不送出：fail open 會讓環境差異成為繞過節流的途徑
+THROTTLE_OUT="$("$SCRIPTS_DIR/advisor-throttle.sh" consume --advisor opencode --scope "$SCOPE")"
+case $? in
+  0) ;;
+  5) printf '%s\n' "$THROTTLE_OUT"
+     # 呼叫端最需要知道的是「要不要重送」——訊息不講，它得去翻文件才敢判斷
+     echo "錯誤：節流額度用盡，prompt 未送出（可安全重試）" >&2; exit 5 ;;
+  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 6 ;;
+esac
 
 # 暫存 stdout / stderr：stdout 供解析，stderr 供失敗診斷（不吞掉）
 LOG="$(mktemp)"; ERR="$(mktemp)"

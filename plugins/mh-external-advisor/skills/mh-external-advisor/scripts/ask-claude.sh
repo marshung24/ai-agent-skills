@@ -10,7 +10,8 @@
 #           -r <session_id>：要延續的 Claude session（省略則開新對話）
 #   輸出  ─ stdout：Claude 回覆文字；最後一行 `[External Advisor claude session_id: <id>]`（供下次 -r 延續）
 #   結束碼─ 0 成功；2 參數錯誤；3 resume 失敗；1 執行失敗（無回覆，或 is_error=true
-#           的錯誤文字不當回覆輸出；可能已有部分副作用）；5 節流擋下（prompt 未送出）；127 缺依賴
+#           的錯誤文字不當回覆輸出；可能已有部分副作用）；5 節流擋下（prompt 未送出）；
+#           6 節流檢查失敗（prompt 未送出）；127 缺依賴
 #
 # 用法：
 #   ask-claude.sh --scope explore "問題"                       # 開新 session
@@ -84,7 +85,7 @@ case $? in
   5) printf '%s\n' "$THROTTLE_OUT"
      # 呼叫端最需要知道的是「要不要重送」——訊息不講，它得去翻文件才敢判斷
      echo "錯誤：節流額度用盡，prompt 未送出（可安全重試）" >&2; exit 5 ;;
-  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 1 ;;
+  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 6 ;;
 esac
 
 # ── 共用旗標 ──

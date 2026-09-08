@@ -10,8 +10,10 @@
 #           -r <session_id>：要延續的 Opencode session（省略則開新對話）
 #   輸出  ─ stdout：Opencode 回覆文字；最後一行 `[External Advisor opencode session_id: <id>]`（供下次 -r 延續）
 #   結束碼─ 0 成功；2 參數錯誤；3 resume 失敗；1 執行失敗（無回覆或回覆不可採信，
-#           可能已有部分副作用）；
-#           127 缺依賴（CLI/jq 未安裝、能力查詢失敗，或偵測不到免互動旗標）
+#           可能已有部分副作用）；5 節流擋下（prompt 未送出）；
+#           6 節流檢查失敗（prompt 未送出）；
+#           127 缺依賴（CLI/jq 未安裝、能力查詢失敗，或偵測不到免互動旗標。
+#               後兩者在扣桶之後，prompt 未送出但已消耗節流額度）
 #
 # 用法：
 #   ask-opencode.sh --scope explore "問題"                      # 開新 session
@@ -85,7 +87,7 @@ case $? in
   5) printf '%s\n' "$THROTTLE_OUT"
      # 呼叫端最需要知道的是「要不要重送」——訊息不講，它得去翻文件才敢判斷
      echo "錯誤：節流額度用盡，prompt 未送出（可安全重試）" >&2; exit 5 ;;
-  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 1 ;;
+  *) echo "錯誤：節流檢查失敗，prompt 未送出" >&2; exit 6 ;;
 esac
 
 # ── 共用旗標：自動核可權限（本環境定位為外部沙箱）、輸出 NDJSON 事件流 ──

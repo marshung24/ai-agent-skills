@@ -53,6 +53,7 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
 
 - `reset` 是**使用者的管理操作**：它清空硬性節流的水位。🚫 不得由自主流程呼叫——被擋下後自行 reset 等於節流不存在
 - 身分解析失敗、鎖逾時一律 **fail closed**，且 🚫 不偽裝成桶滿（exit 5）——那會讓呼叫端誤以為等待即可
+- **重試分兩層，各管各的**：同一次取用內的鎖競爭由 `bucket_lock()` 自行退讓（`mkdir` 搶鎖失敗即重試，上限 `lock_timeout_seconds`，期間回收 owner 已死的殘留鎖）；呼叫端只管跨呼叫的重送，且限判定仍成立、成因已確認排除。🚫 **不得以重跑 adapter 代替鎖等待**——那只是重開同一段等待，不會提高搶到鎖的機會
 - 額度查不到時採**最保守的半速檔**：網路故障不得成為放寬節流的途徑
 - 狀態位於 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/`，是可丟棄的執行狀態，與 `enabled.json`（使用者意圖）分開放
 - 用量記錄 `quota/usage.log` 記 allow 與 deny 兩者（只記成功就看不出節流是否真的擋到），**不記 prompt 內容**，超過 1MB 輪替
@@ -92,9 +93,10 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
 | exit 0 | 成功 |
 | exit 2 | 參數錯誤（缺 prompt、`-r` 的 id 為空字串等——空 id 常見於上一輪擷取失敗，若放行會靜默開新重送，故必擋） |
 | exit 5 | 節流擋下：該 scope 的桶已空，**prompt 未送出**。stdout 為 JSON，含 `retry_after_seconds` |
+| exit 6 | 節流檢查本身失敗（鎖逾時、桶狀態或身分解析），adapter 在啟動顧問 CLI 前退出，**prompt 未送出**。無 `retry_after_seconds`——鎖何時釋放算不出來，🚫 不得比照 exit 5 定一個等待秒數 |
 | exit 3 | resume 失敗。涵蓋範圍：codex/claude/opencode＝resume 路徑上 CLI 任何非零結束（含 id 失效與暫時性錯誤，看 stderr 區分；此三支的 exit 3 一律代表 **prompt 已送出**，CLI 已跑過才判定失敗）；agy＝id 不存在（前置檢查，**prompt 未送出**），或 agy 未接上該段而另開新對話（事後比對回傳 id；此時 **prompt 已執行**、回覆不輸出，stderr 給新 id）。**有效但屬別段的 id 皆無法偵測**，會靜默接錯脈絡（防範靠呼叫端簿記，見 SKILL.md 的多段並存規則） |
-| exit 1 | 執行失敗：無回覆，或有回覆但不可採信（claude＝`is_error=true` 時錯誤文字不當回覆輸出；agy＝CLI 非零結束、輸出非合法 JSON、`status` 非 `SUCCESS`，或 `status=SUCCESS` 但 `.response` 為空，失敗原因見 stdout 的 `.error`）。**可能已產生部分副作用**，重送前先評估 |
-| exit 127 | 缺依賴（CLI 未安裝或缺 `jq`；opencode 另含「能力查詢失敗」與「偵測不到免互動旗標」——旗標名版本相依，見 [docs/internals.md](../docs/internals.md)〈底層指令〉） |
+| exit 1 | 執行失敗：無回覆，或有回覆但不可採信（claude＝`is_error=true` 時錯誤文字不當回覆輸出；agy＝CLI 非零結束、輸出非合法 JSON、`status` 非 `SUCCESS`，或 `status=SUCCESS` 但 `.response` 為空，失敗原因見 stdout 的 `.error`）。**可能已產生部分副作用**，重送前先評估——節流檢查失敗不歸這裡，那是 exit 6，只有它保證未送出 |
+| exit 127 | 缺依賴（CLI 未安裝或缺 `jq`；opencode 另含「能力查詢失敗」與「偵測不到免互動旗標」——旗標名版本相依，見 [docs/internals.md](../docs/internals.md)〈底層指令〉）。四支的依賴與能力檢查都在扣桶之前，**prompt 未送出且未扣桶** |
 
 - 輸出末行標記前一律先驗 id 格式，不合格即**視同未取得 id**（清空改印 `[warn]`，不輸出不可信的 id）：agy 用 `^[A-Za-z0-9-]+$`（其 id 會拼進 `brain/<id>` 路徑做 resume 前置檢查，須防路徑蒙混）；codex/claude/opencode 用 `^[[:graph:]]+$`（id 直接取自各 CLI 的 JSON 欄位，只擋會撐破末行契約的空白與控制字元，過嚴會在上游改格式時誤殺）
 - 成功但未取得 id 時：stdout 無 `[External Advisor ...]` 行，stderr 印 `[warn] 未取得 session_id…，本段對話無法延續`——呼叫端據此得知不可延續。**判斷一律認 `[warn]` 前綴，勿比對全文**：括號內的補充說明各腳本不同（如 agy 會註明是 `conversation_id` 格式不合法）。

@@ -67,7 +67,7 @@ advisor-usage.sh    [--advisor <ai>] [--scope <s>] [--since <d>] [--json]  # 用
 {
   "version": 1,
   "scopes": {
-    "default": { "capacity": 30, "cost": 10, "refill_seconds": 60 },
+    "default": { "capacity": 30, "cost": 7, "refill_seconds": 60 },
     "review":  { "refill_seconds": 90 }
   },
   "quota_thresholds": { "low_below": 40, "high_at": 70 },
@@ -80,7 +80,7 @@ advisor-usage.sh    [--advisor <ai>] [--scope <s>] [--since <d>] [--json]  # 用
 }
 ```
 
-內建預設：**容量 30、每次扣 10、每 60 秒回 1 單位**——即 3 次 burst，用完後每 10 分鐘回一次呼叫的量。每個欄位都必須是正整數，`0`、負數、小數一律**個別退回預設並警告**：設定寫錯不該讓所有諮詢停擺（`refill_seconds` 為 0 會讓恢復量算式除以零）。
+內建預設：**容量 30、每次扣 7、每 60 秒回 1 單位**——即 4 次 burst，用完後每 7 分鐘回一次呼叫的量。每個欄位都必須是正整數，`0`、負數、小數一律**個別退回預設並警告**：設定寫錯不該讓所有諮詢停擺（`refill_seconds` 為 0 會讓恢復量算式除以零）。
 
 `cost > capacity` 會讓該桶永遠取不到，兩者一併退回預設。這個檢查在 **`default` 與各 scope 覆寫兩層都做**——只驗 `default` 的話，單獨設 `review.capacity` 而 `cost` 沿用預設，該 scope 會每次都回 exit 5。**額度餘量只調恢復速率、不調容量**——剩餘 `<40%` 間隔加倍、`≥70%` 間隔減半；容量恆為政策上的 burst 上限，兩者一起放大會讓高餘量時的尖峰過度膨脹。
 

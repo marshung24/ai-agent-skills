@@ -108,7 +108,7 @@ _th_int() {
 # 設定壞掉不應讓諮詢全面停擺，但也不得因此變寬鬆——預設值本身就是保守值。
 load_throttle_config() {
   TH_CAPACITY=30          # 容量：最大 burst＝capacity/cost 次，🚫 不隨額度倍率改變
-  TH_COST=10              # 每次諮詢扣多少
+  TH_COST=7               # 每次諮詢扣多少
   TH_REFILL=60            # 基數：每 60 秒回 1 單位
   TH_LOW_BELOW=40         # 額度剩餘低於此 → 速率減半
   TH_HIGH_AT=70           # 額度剩餘達此 → 速率加倍
@@ -123,7 +123,7 @@ load_throttle_config() {
   v="$(jq -r '
     def n(p; d): (p // d) | if type == "number" then . else d end;
     [ n(.scopes.default.capacity; 30),
-      n(.scopes.default.cost; 10),
+      n(.scopes.default.cost; 7),
       n(.scopes.default.refill_seconds; 60),
       n(.quota_thresholds.low_below; 40),
       n(.quota_thresholds.high_at; 70),
@@ -150,7 +150,7 @@ load_throttle_config() {
   # 欄位間關係：cost 大於 capacity 會讓桶永遠取不到，兩者都退回預設較可預測
   if [ "$TH_COST" -gt "$TH_CAPACITY" ]; then
     echo "[warn] throttle 設定的 cost（${TH_COST}）大於 capacity（${TH_CAPACITY}），兩者改用預設" >&2
-    TH_CAPACITY=30; TH_COST=10
+    TH_CAPACITY=30; TH_COST=7
   fi
   # agent 名單：決定 principal 認得出哪些呼叫端，漏列只會退到 UID 共用桶
   local _names
@@ -297,7 +297,7 @@ bucket_take() {
   cost="$(scope_param "$scope" cost "$TH_COST")"
   refill_base="$(scope_param "$scope" refill_seconds "$TH_REFILL")"
   # 欄位關係要在「套用 scope 覆寫之後」再驗一次：只驗 default 的話，單設
-  # review.capacity=5（cost 沿用 10）會讓該 scope 每次都取不到、永遠 exit 5。
+  # review.capacity=5（cost 沿用 7）會讓該 scope 每次都取不到、永遠 exit 5。
   # TH_CAPACITY/TH_COST 在載入時已驗過關係，退回它們是安全的
   if [ "$cost" -gt "$cap" ] 2>/dev/null; then
     echo "[warn] scope ${scope} 的 cost（${cost}）大於 capacity（${cap}），該 scope 改用預設 ${TH_CAPACITY}/${TH_COST}" >&2

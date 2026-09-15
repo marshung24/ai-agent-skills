@@ -59,7 +59,7 @@
 
 - **身分**：走完整條祖先鏈，取最外層那個名字在 agent 名單內的祖先，一個都沒中則退到 `uid-<UID>`（規則與範例見下節〈分桶身分怎麼取〉；為何不用 wrapper 黑名單、為何取最外層見 design.md §5.20）
 - **incarnation key**：`ps -o lstart=`（Linux／macOS 皆有）。桶檔內存 lstart，不符即視為 PID 已被重用、舊桶失效。🚫 不用 `/proc/<pid>/stat`（Linux only）——這裡不是安全身分驗證，秒級足夠
-- **狀態**：`${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/buckets/<kind>-<id>/<advisor>-<scope>.json`，`<kind>-<id>` 為 `agent-<pid>` 或 `uid-<uid>`——兩種身分來源的桶不混，舊版的純數字 PID 目錄也因此不再被讀到。水位用整數單位（`capacity` 30／`cost` 10／每 `refill_seconds` 回 1）；`refill_seconds` 存「上次生效」的恢復秒數
+- **狀態**：`${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/buckets/<kind>-<id>/<advisor>-<scope>.json`，`<kind>-<id>` 為 `agent-<pid>` 或 `uid-<uid>`——兩種身分來源的桶不混，舊版的純數字 PID 目錄也因此不再被讀到。水位用整數單位（`capacity` 30／`cost` 7／每 `refill_seconds` 回 1）；`refill_seconds` 存「上次生效」的恢復秒數
 - **計算順序**：舊 `refill` 排水 → 判斷 → 寫回時才換成新 `refill`。`elapsed` 為負（時鐘倒退、NTP 校時）取 0 並警告，🚫 不得反向增加水位
 - **鎖**：每桶一個 `mkdir` 目錄鎖（macOS 無 `flock`）。owner 檔存 PID／lstart／nonce／建立時間；回收 stale 鎖先原子 `mv` 成唯一名再刪，避免兩個等待者同時拆鎖；解鎖前比對 nonce，防被回收的舊 owner 刪掉後來者的鎖。`ps` 查不到（回 2）時**不**回收——誤刪比多等昂貴；另設「鎖存在超過 12 倍逾時」的保底回收，避免永久鎖死
 - **額度查詢一律在鎖外**：它走網路要數秒，持鎖期間查會阻塞同桶所有背景諮詢。快取按顧問名分開，TTL 5 分鐘、失敗沿用舊值至多 30 分鐘

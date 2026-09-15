@@ -57,7 +57,7 @@ scripts/ask-codex.sh --scope unblock -r <id> "那如果併發呼叫呢？"
 
 桶依 `(呼叫端 agent, scope, 顧問)` 隔離——每支顧問的訂閱額度獨立計算，互不排擠；同一台機器上多個 agent 也互不干擾。「呼叫端 agent」取祖先鏈**最外層**那個名字在名單內的程序（預設 `claude`／`codex`／`opencode`／`agy`），所以中間夾了 `timeout` 這類 wrapper、或 agent 又派生 agent，水位都算在同一份上。名單外的 agent 會退到該 UID 的共用桶並在 stderr 警告——把它的程序名加進 `principal_names` 即可恢復獨立計量。
 
-**預設**：容量 30、每次扣 10、每 60 秒回 1 單位——即連續 3 次後見底，之後每 10 分鐘回一次呼叫的量。額度餘量高時恢復更快（`>=70%` 間隔減半、`<40%` 加倍），但**容量不變**。
+**預設**：容量 30、每次扣 7、每 60 秒回 1 單位——即連續 4 次後不足再取，之後每 7 分鐘回一次呼叫的量。額度餘量高時恢復更快（`>=70%` 間隔減半、`<40%` 加倍），但**容量不變**。
 
 ```bash
 # 查水位（唯讀，不查網路、不建任何檔案）
@@ -76,7 +76,7 @@ scripts/advisor-throttle.sh reset --all
 {
   "version": 1,
   "scopes": {
-    "default": { "capacity": 30, "cost": 10, "refill_seconds": 60 },
+    "default": { "capacity": 30, "cost": 7, "refill_seconds": 60 },
     "review":  { "refill_seconds": 90 }
   }
 }

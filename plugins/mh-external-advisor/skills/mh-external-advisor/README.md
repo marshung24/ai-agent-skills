@@ -81,6 +81,22 @@ scripts/advisor-throttle.sh reset --all
 
 缺檔即用內建預設。每個欄位都必須是正整數，`0`、負數、小數或 `cost > capacity` 會**個別退回預設並在 stderr 印 `[warn]`**——設定寫錯不該讓所有諮詢停擺。完整欄位、結束碼與內部行為見 [references/detail.md](references/detail.md)〈節流〉。
 
+不想手寫 JSON 就用設定工具：
+
+```bash
+# 看生效中的設定與各值來源（含各 scope 繼承後的最終值）
+scripts/advisor-throttle-config.sh show
+
+# 改一個欄位；值若不會生效會當場被擋下，不寫入
+scripts/advisor-throttle-config.sh set scopes.review.refill_seconds 90
+scripts/advisor-throttle-config.sh unset scopes.review
+
+# 檢查設定並修復已失效的欄位
+scripts/advisor-throttle-config.sh check
+```
+
+`check` **只移除 reader 現在就已經在忽略或退回預設的欄位**，修完的節流行為與修之前完全相同；生效中的值、以及本工具不認得的欄位一律只回報、不更動。它也會在 `make install`／`make update` 裝到本 skill 時自動跑一次——設定放在家目錄，不隨 skill 更新，版本前進後可能留下已失效的欄位。
+
 用量記錄在 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/usage.log`，allow 與 deny 都記，**不含 prompt 內容**，超過 1MB 輪替。
 
 ## 需求

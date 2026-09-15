@@ -55,9 +55,10 @@ usage_new_invocation_id() {
 # 在高頻換手時誤傷——要嘛搶走剛建好的活躍鎖，要嘛讓真正的孤兒鎖永遠卡住。
 #
 # 內容三行：PID／nonce／owner 的 start time。
+# start time 由 _usage_lock 先取好再傳進來，🚫 不在這裡現查：這個函式在搶鎖迴圈中
+# 每輪都會被呼叫，現查等於每輪 fork 一個 ps，且任何一輪查失敗就會寫出空的第三行
 _usage_lock_payload() {
-  printf '%s\n%s\n%s\n' "$$" "$USAGE_LOCK_NONCE" \
-    "$(ps -o lstart= -p $$ 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$//')"
+  printf '%s\n%s\n%s\n' "$$" "$USAGE_LOCK_NONCE" "$USAGE_LOCK_LSTART"
 }
 
 # owner 是否仍是當初那個程序。三態，🚫 不可壓成兩態——`ps` 在高並行下會偶發查不到，
@@ -66,6 +67,9 @@ _usage_lock_payload() {
 _usage_owner_state() {
   local pid="$1" want="$2" now
   [ -n "$pid" ] || return 2
+  # 鎖內沒記下 start time（建鎖當下 ps 失敗）＝判不出是不是同一個程序。少了這道，
+  # 空的 want 會比不過任何實際值而落進「PID 已被重用」，把活著的鎖搶走
+  [ -n "$want" ] || return 2
   kill -0 "$pid" 2>/dev/null || return 1       # 不 fork 的存在性檢查
   now="$(ps -o lstart= -p "$pid" 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$//')"
   [ -n "$now" ] || return 2                    # ps 暫時失敗：誤刪比多等昂貴
@@ -80,6 +84,11 @@ _usage_owner_state() {
 # 才表示還是同一個殘留鎖
 _usage_lock() {
   local lock="$USAGE_LOG.lock" waited=0 snap
+  # 先取自己的 start time，取不到就不取鎖（退化成只 append、不輪替，與搶不到鎖同路徑）。
+  # 🚫 不得建立一個第三行為空的鎖：那種鎖的 owner 事後無從驗證，owner 若死在解鎖前，
+  # 後續每個 writer 都只能空等滿逾時，輪替從此永久失效
+  USAGE_LOCK_LSTART="$(ps -o lstart= -p $$ 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$//')"
+  [ -n "$USAGE_LOCK_LSTART" ] || return 1
   USAGE_LOCK_NONCE="$$-$RANDOM-$RANDOM"
   while ! ( set -C; _usage_lock_payload > "$lock" ) 2>/dev/null; do
     snap="$(cat "$lock" 2>/dev/null)"

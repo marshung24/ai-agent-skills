@@ -51,18 +51,38 @@ done
   || { echo "錯誤：--since 需為 YYYY-MM-DD" >&2; exit 2; }
 
 # 讀取順序 .1 在前：兩份合起來才是時間上連續的一段，反過來接會讓時間窗口倒錯
-SOURCES=()
-[ -f "$USAGE_LOG.1" ] && SOURCES+=("$USAGE_LOG.1")
-[ -f "$USAGE_LOG" ] && SOURCES+=("$USAGE_LOG")
+collect_sources() {
+  SOURCES=()
+  [ -f "$USAGE_LOG.1" ] && SOURCES+=("$USAGE_LOG.1")
+  [ -f "$USAGE_LOG" ] && SOURCES+=("$USAGE_LOG")
+}
+collect_sources
 [ "${#SOURCES[@]}" -gt 0 ] || { echo "查無用量資料（$USAGE_LOG）" >&2; exit 4; }
 
+# stat 的旗標風味互不相容：GNU（Linux）用 -c、BSD（macOS）用 -f，偵測一次即可。
+# 🚫 不用 `-c … || -f …` 串接——GNU stat 在 .1 不存在時也會回非零，那會誤觸發
+# BSD 分支並在 Linux 上得到空指紋
+_STAT_FMT=()
+if stat -c '%i' . >/dev/null 2>&1; then _STAT_FMT=(-c '%i:%s:%Y')
+elif stat -f '%i' . >/dev/null 2>&1; then _STAT_FMT=(-f '%i:%z:%m')
+else echo "[warn] 找不到可用的 stat 旗標風味，無法偵測讀取期間的輪替" >&2
+fi
+
 # 兩個檔案的指紋。讀取期間若發生輪替，已讀完的 .1 會被當前檔覆蓋，那一整段事件就
-# 憑空消失在報告外——本工具唯讀、🚫 不取 writer 的鎖，只能靠前後比對偵測並重讀
-snapshot_id() { stat -c '%i:%s:%Y' "$USAGE_LOG.1" "$USAGE_LOG" 2>/dev/null | paste -sd'|' -; }
+# 憑空消失在報告外——本工具唯讀、🚫 不取 writer 的鎖，只能靠前後比對偵測並重讀。
+# 取不到指紋時回一個每次都不同的值：寧可報「不穩定」讓人知道偵測失效，也不能回空
+# 字串——那會讓前後比對恆等，靜默宣稱資料穩定
+snapshot_id() {
+  [ "${#_STAT_FMT[@]}" -gt 0 ] || { printf 'nofingerprint-%s-%s\n' "$$" "$RANDOM"; return 0; }
+  stat "${_STAT_FMT[@]}" "$USAGE_LOG.1" "$USAGE_LOG" 2>/dev/null | paste -sd'|' -
+}
 
 RAW=""; SNAPSHOT_STABLE=1
 for _try in 1 2 3; do
   _before="$(snapshot_id)"
+  # 每次重試都重建來源清單：啟動時若還沒有 .1，而讀取期間 writer 剛好輪替出一份，
+  # 沿用舊清單會漏掉整段已輪替的事件，卻因前後指紋一致而回報「穩定」
+  collect_sources
   RAW="$(cat "${SOURCES[@]:-}" 2>/dev/null)"
   [ "$_before" = "$(snapshot_id)" ] && { SNAPSHOT_STABLE=1; break; }
   SNAPSHOT_STABLE=0
@@ -149,11 +169,16 @@ REPORT="$(printf '%s' "$RAW" | jq -Rs --arg ai "$FILTER_AI" \
         near_empty: ($dec | map(select(.decision == "allow" and .remaining_after != null
           and .cost != null and .remaining_after < .cost)) | length)
       },
+      # 身分是 (kind, id, lstart) 三者，🚫 不可只用 id——PID 會被 OS 重用（繞回後
+      # 從小號重新分配），只算 id 會把兩個不同 incarnation 併成一個而漏掉警告
       principals: ($dec | map(select(.principal != null))
         | group_by(.principal.comm)
         | map({ comm: (.[0].principal.comm // "unknown"),
                 events: length,
-                distinct_ids: (map(.principal.id) | unique | length),
+                distinct_incarnations:
+                  (map([.principal.kind, .principal.id, .principal.lstart]) | unique | length),
+                first_ts: (map(.ts) | min),
+                last_ts: (map(.ts) | max),
                 kinds: (map(.principal.kind) | unique) })
         | sort_by(-.events))
     }
@@ -210,8 +235,11 @@ printf '%s' "$REPORT" | jq -r '
   "  放行後低於單次成本  \(.tuning.near_empty) 次",
   "",
   "═══ principal 分桶完整性 ═══",
-  "  桶是按 principal 分的；同一個名字若每次都是新 PID，等於每次都拿到滿桶",
+  "  桶按 principal 分；身分是 kind+PID+lstart，PID 會被 OS 重用故單看 PID 不足",
   (.principals[] |
-    "  \(.comm)  事件=\(.events)  不同PID=\(.distinct_ids)  kind=\(.kinds | join(","))" +
-    (if .events > 1 and .distinct_ids == .events then "  ⚠ 每次都是新 PID，結構上可繞過 burst 上限" else "" end))
+    "  \(.comm)  事件=\(.events)  不同incarnation=\(.distinct_incarnations)  kind=\(.kinds | join(","))" +
+    (if .events > 1 and .distinct_incarnations == .events then
+      "\n      ⚠ 每次呼叫都落在新 incarnation（\(.first_ts[0:16]) ～ \(.last_ts[0:16])）：跨度短＝桶被拆開、" +
+      "等同沒有 burst 上限；跨度長也可能只是每個 session 各問一次，需自行判讀"
+     else "" end))
 '

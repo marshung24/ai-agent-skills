@@ -187,6 +187,21 @@ copy 方式逐 skill 標示：
 - **`update` 對本機註冊的 codex marketplace 會略過**：判準取自 codex 自己的 `marketplace list --json`（`sourceType`），不是本次的 `SOURCE`——兩者可能不一致（用 `SOURCE=$PWD` 裝好後直接跑 `update`，預設來源是 GitHub）。以 SOURCE 判斷會誤跑 `upgrade`，換來一個「is not configured as a Git marketplace」的誤報失敗。
 - **名稱不寫死**：marketplace 名與 plugin 名一律用 `jq` 從 `marketplace.json` 讀取，改名只需改 manifest。
 
+## 安裝後自檢
+
+`install`／`update` 跑完後，對本次真的裝上或更新到的每個 skill，若 `plugins/<name>/skills/<name>/scripts/post-install-check.sh` 存在且可執行就呼叫一次。
+
+> 讀本節的時機：某個 skill 有「放在使用者家目錄、不隨 skill 一起更新」的設定，而 skill 版本前進後舊設定可能失效。
+
+這是**約定，不是特例**——安裝器不認得任何特定 plugin，只看那個檔在不在，要用的 skill 自己提供。
+
+- **逐 skill 只跑一次**，不隨 agent 數重複：這類設定是 per-user 的，裝到四家 agent 也只有一份。
+- **結束碼一律吞掉**，不併入整體結果：安裝本身成功與否，不該由使用者設定的檢查結果決定。
+- **`remove` 不跑**：設定留著是刻意的，重裝後還要用。
+- **安裝沒成功就不跑**：任一步驟失敗、或每家 agent 都因缺 CLI 被略過時整個跳過——沒裝成任何東西卻改了使用者設定，是使用者無從預期的副作用。守門看的是整體結果，未逐 skill 追蹤成敗：後者要把狀態穿進 `run`／`copy_*`／`marketplace_*` 整條鏈，代價遠大於它擋掉的情境。
+
+目前只有 `mh-external-advisor` 用它，檢查節流設定 `throttle.json` 有沒有已失效的欄位。
+
 ## 已驗證
 
 以隔離的假 `HOME`（含獨立 `CODEX_HOME`）實測，除另註明外皆以 `SOURCE=$PWD` 為來源：

@@ -110,6 +110,7 @@ SKILLS="${SKILLS:-}"   # 空＝repo 內全部；否則只處理指定的那幾�
 
 ALL_AGENTS="claude codex agy opencode"
 FAILED=0   # 任一步驟失敗即設為 1，作為整體結束碼
+INSTALLED_ANY=0  # 是否真的有 agent 走完安裝／更新——決定要不要跑安裝後自檢
 
 # ════════════════ 共用工具 ════════════════
 
@@ -1320,6 +1321,36 @@ if [ -z "$SKILLS" ] && [ -t 0 ] && [ -r /dev/tty ]; then
   esac
 fi
 
+# ── 安裝後自檢 ────────────────────────────────────────────────────
+# 使用者設定（家目錄）不隨 skill 一起更新，skill 版本前進後可能出現已失效的欄位。
+# 這裡只定約定、不認得任何特定 plugin：skill 自己提供 scripts/post-install-check.sh
+# 就會被呼叫。設定是 per-user 的，所以逐 skill 只跑一次，🚫 不隨 agent 數重複。
+# DECISION: 自檢結束碼一律吞掉，不併入 FAILED——安裝本身成功與否，不該由使用者
+#           設定的檢查結果決定
+# 安裝失敗、或每家 agent 都因缺 CLI 被略過時不跑：沒裝成任何東西卻改了使用者
+# 設定，是使用者無從預期的副作用。
+# DECISION: 用整體結果守門，未逐 skill 追蹤成敗——後者要把狀態穿進 run／copy_*／
+#           marketplace_* 整條鏈，代價遠大於它擋掉的情境
+run_post_install_check() {
+  if [ "$FAILED" -ne 0 ] || [ "$INSTALLED_ANY" -eq 0 ]; then
+    return 0
+  fi
+  post_install_check "$@"
+}
+
+post_install_check() {
+  local sk hook done_list=""
+  for sk in "$@"; do
+    [ -n "$sk" ] || continue
+    case " $done_list " in *" $sk "*) continue ;; esac
+    done_list+="$sk "
+    hook="$REPO_ROOT/plugins/$sk/skills/$sk/scripts/post-install-check.sh"
+    [ -x "$hook" ] || continue
+    printf '\n[%s] 安裝後自檢\n' "$sk"
+    "$hook" || true
+  done
+}
+
 # ── install / remove / update ──
 # DECISION: 先印「計畫」再執行——方式與來源逐 agent 不同，單一行標頭必然對其中幾家是錯的。
 #           把解析結果攤開，使用者在動手前就能確認每家各自會用什麼方式、動到哪裡
@@ -1354,10 +1385,12 @@ if [ -n "$USE_MATRIX" ]; then
     fi
     if [ -n "${ADD_MAP[$a]}" ]; then
       SKILLS="${ADD_MAP[$a]}"
-      if [ "$mode" = marketplace ]; then SOURCE="$(agent_source "$a")"; "marketplace_${a}_install"
-      else skip_missing "$a" "$a" || copy_install "$a"; fi
+      if [ "$mode" = marketplace ]; then SOURCE="$(agent_source "$a")"; "marketplace_${a}_install"; INSTALLED_ANY=1
+      else skip_missing "$a" "$a" || { copy_install "$a"; INSTALLED_ANY=1; }; fi
     fi
   done
+  # 只對本次真的裝上／更新到的 skill 跑，未變動的不打擾
+  run_post_install_check $(for a in $(matrix_agents); do printf '%s ' "${ADD_MAP[$a]}"; done)
   SKILLS=""
   exit "$FAILED"
 fi
@@ -1393,12 +1426,17 @@ for a in $TARGETS; do
   if [ "$mode" = marketplace ]; then
     SOURCE="$(agent_source "$a")"
     "marketplace_${a}_${CMD}"
+    INSTALLED_ANY=1
   else
     skip_missing "$a" "$a" && continue
     "copy_${CMD}" "$a"
+    INSTALLED_ANY=1
   fi
 
   [ "$CMD" = remove ] && leftover_remove "$a"
 done
+
+# remove 不跑自檢：設定留著是刻意的，重裝後還要用
+[ "$CMD" != remove ] && run_post_install_check ${SKILLS:-$(repo_skills)}
 
 exit "$FAILED"

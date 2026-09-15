@@ -74,13 +74,16 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
   "quota_stale_max_seconds": 1800,
   "lock_timeout_seconds": 5,
   "gc_interval_seconds": 21600,
-  "gc_max_age_seconds": 604800
+  "gc_max_age_seconds": 604800,
+  "principal_names": ["claude", "codex", "opencode", "agy"]
 }
 ```
 
 內建預設：**容量 30、每次扣 10、每 60 秒回 1 單位**——即 3 次 burst，用完後每 10 分鐘回一次呼叫的量。每個欄位都必須是正整數，`0`、負數、小數一律**個別退回預設並警告**：設定寫錯不該讓所有諮詢停擺（`refill_seconds` 為 0 會讓恢復量算式除以零）。
 
 `cost > capacity` 會讓該桶永遠取不到，兩者一併退回預設。這個檢查在 **`default` 與各 scope 覆寫兩層都做**——只驗 `default` 的話，單獨設 `review.capacity` 而 `cost` 沿用預設，該 scope 會每次都回 exit 5。**額度餘量只調恢復速率、不調容量**——剩餘 `<40%` 間隔加倍、`≥70%` 間隔減半；容量恆為政策上的 burst 上限，兩者一起放大會讓高餘量時的尖峰過度膨脹。
+
+`principal_names` 決定水位算在誰頭上：節流走完整條祖先鏈，取最外層那個名字在這份清單內的程序——巢狀 agent 一律算在使用者實際啟動的那一支頭上；一個都沒中就退到該 UID 的共用桶（`consume` 時印 `[warn]`）。**用別的 agent CLI 跑本 skill 時把它的程序名加進來**，否則它會與同一使用者的其他呼叫端共用水位。值須為字串陣列，空陣列或不可解析時退回預設清單；規則與範例見 [docs/internals.md](../docs/internals.md)〈分桶身分怎麼取〉。
 
 ### 設定工具
 

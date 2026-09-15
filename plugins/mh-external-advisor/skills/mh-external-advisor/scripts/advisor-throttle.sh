@@ -84,11 +84,17 @@ SELF_LSTART="$(ps -o lstart= -p $$ 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$/
 
 # 身分取不到一律 fail closed：fail open 會讓環境差異直接成為繞過節流的途徑
 if ! resolve_principal; then
-  echo "[warn] 無法辨識呼叫端 AI Agent（祖先鏈中找不到非 shell 程序）" >&2
+  echo "[warn] 無法決定節流身分（祖先鏈查不到已知 agent，且取不到 UID）" >&2
   echo "錯誤：節流身分解析失敗，未取用額度" >&2
   exit 1
 fi
 AGENT_LABEL="${PRINCIPAL_COMM:-agent}"
+# 退到 UID 桶代表呼叫端不在 agent 名單內：水位會與同一使用者的其他呼叫端共用，
+# 說出來使用者才知道可以把自己的 agent 加進 principal_names
+if [ "$PRINCIPAL_KIND" = "uid" ] && [ "$CMD" = "consume" ]; then
+  echo "[warn] 祖先鏈中找不到已知的 AI Agent，本次改用 UID 共用桶（uid-${PRINCIPAL_ID}）。" >&2
+  echo "[warn] 要讓它獨立計量，請把該 agent 的程序名加進 ${THROTTLE_CONFIG} 的 principal_names" >&2
+fi
 
 case "$CMD" in
   consume)

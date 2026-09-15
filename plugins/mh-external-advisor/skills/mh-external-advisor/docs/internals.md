@@ -57,14 +57,43 @@
 
 使用面（`--scope`、exit 5、`advisor-throttle.sh` 的子命令）見 detail.md〈節流〉；以下是 `lib/throttle-io.sh` 的實作細節。
 
-- **身分**：沿祖先鏈取第一個非 shell 祖先（只跳過 `sh`／`bash`／`zsh`／`dash`／`ksh`／`fish`），最多追 20 層。🚫 不以已知 CLI 名單比對——名單會過期，且 `node` 本身可能就是 agent 本體。追到 PID 0／1 代表中間沒有可辨識的 agent，視為解析失敗
+- **身分**：走完整條祖先鏈，取最外層那個名字在 agent 名單內的祖先，一個都沒中則退到 `uid-<UID>`（規則與範例見下節〈分桶身分怎麼取〉；為何不用 wrapper 黑名單、為何取最外層見 design.md §5.20）
 - **incarnation key**：`ps -o lstart=`（Linux／macOS 皆有）。桶檔內存 lstart，不符即視為 PID 已被重用、舊桶失效。🚫 不用 `/proc/<pid>/stat`（Linux only）——這裡不是安全身分驗證，秒級足夠
-- **狀態**：`${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/buckets/<pid>/<advisor>-<scope>.json`。水位用整數單位（`capacity` 30／`cost` 10／每 `refill_seconds` 回 1）；`refill_seconds` 存「上次生效」的恢復秒數
+- **狀態**：`${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/buckets/<kind>-<id>/<advisor>-<scope>.json`，`<kind>-<id>` 為 `agent-<pid>` 或 `uid-<uid>`——兩種身分來源的桶不混，舊版的純數字 PID 目錄也因此不再被讀到。水位用整數單位（`capacity` 30／`cost` 10／每 `refill_seconds` 回 1）；`refill_seconds` 存「上次生效」的恢復秒數
 - **計算順序**：舊 `refill` 排水 → 判斷 → 寫回時才換成新 `refill`。`elapsed` 為負（時鐘倒退、NTP 校時）取 0 並警告，🚫 不得反向增加水位
 - **鎖**：每桶一個 `mkdir` 目錄鎖（macOS 無 `flock`）。owner 檔存 PID／lstart／nonce／建立時間；回收 stale 鎖先原子 `mv` 成唯一名再刪，避免兩個等待者同時拆鎖；解鎖前比對 nonce，防被回收的舊 owner 刪掉後來者的鎖。`ps` 查不到（回 2）時**不**回收——誤刪比多等昂貴；另設「鎖存在超過 12 倍逾時」的保底回收，避免永久鎖死
 - **額度查詢一律在鎖外**：它走網路要數秒，持鎖期間查會阻塞同桶所有背景諮詢。快取按顧問名分開，TTL 5 分鐘、失敗沿用舊值至多 30 分鐘
-- **GC**：取用時至多觸發一次、間隔 6 小時；只清 lstart 不符或超過 7 天的桶。`ps` 暫時失敗不得據以刪除；GC 失敗只警告
+- **GC**：取用時至多觸發一次、間隔 6 小時；只清 lstart 不符或超過 7 天的桶。`uid-` 桶與舊版純 PID 目錄查不了 incarnation（UID 不會被重用），只走保存期。`ps` 暫時失敗不得據以刪除；GC 失敗只警告
 - **peek 不寫檔**：投影公式對同一時間點冪等，唯讀查詢不必改 `updated_at`
+
+### 分桶身分怎麼取
+
+規則只有一條：**走完整條祖先鏈，取最外層那個名字落在 `principal_names` 內的程序**（最多追 40 層，走到 PID 1 或 PPID 0 即止）；一個都沒中就用 `uid-<UID>` 並在 `consume` 時警告。名單預設 `claude codex opencode agy`，`throttle.json` 的 `principal_names` 可覆寫（值須為字串陣列；空陣列或不可解析時退回預設）。
+
+兩件事都不做：不「跳過 shell／跳過 wrapper」——**不在名單內的一律繼續往上走**，shell、`node`、`timeout` 因此都不會被選中；也不在第一個命中就停手——**命中後繼續往上覆寫**，留下的是最外層那個。
+
+祖先鏈由左（最外層）往右（最內層）列，principal 取的是**最左邊那個中選的**：
+
+| 祖先鏈 | principal | 桶目錄 |
+|---|---|---|
+| `claude` → bash → `ask-*.sh` | `claude` | `agent-<claude pid>` |
+| `claude` → bash → node → bash → `ask-*.sh` | `claude` | `agent-<claude pid>` |
+| `claude` → bash → node → **timeout** → bash → `ask-*.sh` | `claude` | `agent-<claude pid>` |
+| `claude` → bash → node → **`codex`** → bash → `ask-*.sh` | `claude` | `agent-<claude pid>` |
+| `claude` → **`codex`** → **`agy`** → bash → `ask-*.sh` | `claude` | `agent-<claude pid>` |
+| `codex` → `agy` → bash → `ask-*.sh`（無 claude） | `codex` | `agent-<codex pid>` |
+| `cursor`（不在名單）→ bash → `ask-*.sh` | 無 | `uid-<uid>` |
+
+兩個洞各對應一種取法，兩者都會讓呼叫端拿到用不完的滿桶：
+
+- **第 3 列——選錯層**：`timeout`／`xargs`／`flock`／`sudo` 這類 wrapper fork 後仍留在祖先鏈上，且每次呼叫都是新 PID，被選中就等於每次開一個新桶。靠「只認名單內的 agent」擋掉
+- **第 4、5 列——停太早**：停在第一個命中時，內層每多起一個 agent 就換到一個新桶，套幾層就有幾份配額。靠「命中後繼續往上取最外層」擋掉
+
+第 6 列是同一條規則的另一面：鏈上沒有更外層的 agent 時，最外層就是 `codex` 自己——使用者直接啟動哪一支，桶就歸哪一支。
+
+完整桶鍵為 `(kind, id, lstart, advisor, scope)`，落到路徑是 `buckets/<kind>-<id>/<advisor>-<scope>.json`，例如 `buckets/agent-42680/codex-review.json`。同一個 agent 的四支顧問 × 三個 scope 各自獨立，最多 12 個桶。
+
+**主 agent 與子 agent 共用同一個桶**：四支 CLI 的子 agent 都是 in-process（實測），子 agent 只是多開一個 shell 去跑工具，agent 本體不分裂，因此 principal 相同。🚫 不可改用各家的 conversation／task ID 當身分——`agy` 的 `ANTIGRAVITY_CONVERSATION_ID` 每個子 agent 就換一個，拿它當 principal 會退化成與 wrapper 相同的分裂形狀。
 
 ## 設計取捨（DECISION）
 

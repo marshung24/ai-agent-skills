@@ -41,6 +41,7 @@
 advisor-throttle.sh status  [--advisor <ai>] [--scope <scope>]   # 唯讀投影，不查網路、不改狀態
 advisor-throttle.sh consume --advisor <ai> --scope <scope>       # 取用一次（adapter 內部使用）
 advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
+advisor-usage.sh    [--advisor <ai>] [--scope <s>] [--since <d>] [--json]  # 用量診斷（唯讀）
 ```
 
 | 結束碼 | 意義 |
@@ -56,7 +57,7 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
 - **重試分兩層，各管各的**：同一次取用內的鎖競爭由 `bucket_lock()` 自行退讓（`mkdir` 搶鎖失敗即重試，上限 `lock_timeout_seconds`，期間回收 owner 已死的殘留鎖）；呼叫端只管跨呼叫的重送，且限判定仍成立、成因已確認排除。🚫 **不得以重跑 adapter 代替鎖等待**——那只是重開同一段等待，不會提高搶到鎖的機會
 - 額度查不到時採**最保守的半速檔**：網路故障不得成為放寬節流的途徑
 - 狀態位於 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/`，是可丟棄的執行狀態，與 `enabled.json`（使用者意圖）分開放
-- 用量記錄 `quota/usage.log` 記 allow 與 deny 兩者（只記成功就看不出節流是否真的擋到），**不記 prompt 內容**，超過 1MB 輪替
+- 用量記錄 `quota/usage.log` 為 JSONL 事件流，**不記 prompt 內容**，超過 1MB 輪替
 
 ### 設定檔
 

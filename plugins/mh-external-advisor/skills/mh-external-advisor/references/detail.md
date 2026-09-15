@@ -41,6 +41,7 @@
 advisor-throttle.sh status  [--advisor <ai>] [--scope <scope>]   # 唯讀投影，不查網路、不改狀態
 advisor-throttle.sh consume --advisor <ai> --scope <scope>       # 取用一次（adapter 內部使用）
 advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
+advisor-usage.sh    [--advisor <ai>] [--scope <s>] [--since <d>] [--json]  # 用量診斷（唯讀）
 ```
 
 | 結束碼 | 意義 |
@@ -56,7 +57,7 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
 - **重試分兩層，各管各的**：同一次取用內的鎖競爭由 `bucket_lock()` 自行退讓（`mkdir` 搶鎖失敗即重試，上限 `lock_timeout_seconds`，期間回收 owner 已死的殘留鎖）；呼叫端只管跨呼叫的重送，且限判定仍成立、成因已確認排除。🚫 **不得以重跑 adapter 代替鎖等待**——那只是重開同一段等待，不會提高搶到鎖的機會
 - 額度查不到時採**最保守的半速檔**：網路故障不得成為放寬節流的途徑
 - 狀態位於 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/`，是可丟棄的執行狀態，與 `enabled.json`（使用者意圖）分開放
-- 用量記錄 `quota/usage.log` 記 allow 與 deny 兩者（只記成功就看不出節流是否真的擋到），**不記 prompt 內容**，超過 1MB 輪替
+- 用量記錄 `quota/usage.log` 為 JSONL 事件流，**不記 prompt 內容**，超過 1MB 輪替
 
 ### 設定檔
 
@@ -66,7 +67,7 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
 {
   "version": 1,
   "scopes": {
-    "default": { "capacity": 30, "cost": 10, "refill_seconds": 60 },
+    "default": { "capacity": 30, "cost": 7, "refill_seconds": 60 },
     "review":  { "refill_seconds": 90 }
   },
   "quota_thresholds": { "low_below": 40, "high_at": 70 },
@@ -74,13 +75,41 @@ advisor-throttle.sh reset   --advisor <ai> --scope <scope>|--all # 重置水位
   "quota_stale_max_seconds": 1800,
   "lock_timeout_seconds": 5,
   "gc_interval_seconds": 21600,
-  "gc_max_age_seconds": 604800
+  "gc_max_age_seconds": 604800,
+  "principal_names": ["claude", "codex", "opencode", "agy"]
 }
 ```
 
-內建預設：**容量 30、每次扣 10、每 60 秒回 1 單位**——即 3 次 burst，用完後每 10 分鐘回一次呼叫的量。每個欄位都必須是正整數，`0`、負數、小數一律**個別退回預設並警告**：設定寫錯不該讓所有諮詢停擺（`refill_seconds` 為 0 會讓恢復量算式除以零）。
+內建預設：**容量 30、每次扣 7、每 60 秒回 1 單位**——即 4 次 burst，用完後每 7 分鐘回一次呼叫的量。每個欄位都必須是正整數，`0`、負數、小數一律**個別退回預設並警告**：設定寫錯不該讓所有諮詢停擺（`refill_seconds` 為 0 會讓恢復量算式除以零）。
 
 `cost > capacity` 會讓該桶永遠取不到，兩者一併退回預設。這個檢查在 **`default` 與各 scope 覆寫兩層都做**——只驗 `default` 的話，單獨設 `review.capacity` 而 `cost` 沿用預設，該 scope 會每次都回 exit 5。**額度餘量只調恢復速率、不調容量**——剩餘 `<40%` 間隔加倍、`≥70%` 間隔減半；容量恆為政策上的 burst 上限，兩者一起放大會讓高餘量時的尖峰過度膨脹。
+
+`principal_names` 決定水位算在誰頭上：節流走完整條祖先鏈，取最外層那個名字在這份清單內的程序——巢狀 agent 一律算在使用者實際啟動的那一支頭上；一個都沒中就退到該 UID 的共用桶（`consume` 時印 `[warn]`）。**用別的 agent CLI 跑本 skill 時把它的程序名加進來**，否則它會與同一使用者的其他呼叫端共用水位。值須為字串陣列，空陣列或不可解析時退回預設清單；規則與範例見 [docs/internals.md](../docs/internals.md)〈分桶身分怎麼取〉。
+
+### 設定工具
+
+`scripts/advisor-throttle-config.sh`，四個子命令：`show`（生效值與來源）、`check`（檢查並修復）、`set`／`unset`（改單一欄位或整個 scope）。結束碼：`0` 成功、`1` 執行失敗、`2` 參數錯誤、`127` 缺 `jq`。
+
+**值域規則不在這支腳本裡**。合不合法一律把值餵給 reader（`load_throttle_config`／`scope_param`）判定，看它有沒有印 `[warn]`；自己寫一份必然與 reader 漂移，而漂移的後果是管理工具說合法、執行期卻退回預設。`set` 比較的是「改之前與改之後的警告差集」而非「改之後有沒有警告」——設定檔本來就有的問題不該讓這次改動背鍋，而單鍵隔離驗證也看不到 `cost`／`capacity` 之間的關係。
+
+腳本內唯一回顯規則的地方是 **scope 層的 `cost > capacity`**：該檢查位在 `bucket_take` 而非任何 io 函式，不回顯就得讓管理工具走到節流的執行路徑才驗得到。
+
+`check` 的修復邊界——**只動 reader 現在就已經在忽略或退回預設的欄位**，修完的節流行為與修之前完全相同，差別只有檔案變乾淨、每次呼叫的 `[warn]` 消失：
+
+| 情況 | 處置 |
+|------|------|
+| 型別不是數字（`"cost": "7"`） | 移除。這是唯一不會被 reader 警告的失效——jq 的 `n(p; d)` 直接換成預設，無聲 |
+| 值域不合法（reader 會 `[warn]`） | 移除 |
+| 缺 `version` 戳記 | 補上 |
+| 生效中的值與內建預設不同 | **只回報**。那是使用者刻意的覆寫，自動改等於趁安裝偷換政策 |
+| `cost > capacity` | **只回報**。要捨棄哪一個屬使用者意圖 |
+| 本工具不認得的欄位 | **只回報**。認不得可能是工具比 reader 舊或新，刪除不可逆 |
+
+缺檔是合法狀態，`check` 回報後即結束、🚫 不順手建檔。設定檔不是合法 JSON 時不修復——結構讀不出來，改哪裡都是猜。有修改才寫檔，並留單一份 `.bak`。
+
+`version` 是本工具寫入時蓋的 **schema 戳記**，供日後欄位改名時判斷要不要 migrate；reader 不讀它。
+
+安裝流程末端會經 `scripts/post-install-check.sh` 呼叫 `check` 一次，機制見 [tools/README.md](../../../../tools/README.md)〈安裝後自檢〉。
 
 ## 輸出契約
 

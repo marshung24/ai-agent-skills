@@ -5,16 +5,15 @@
 #       它不依賴呼叫端自律——扣桶動作嵌在 adapter 內部，呼叫端繞不過；因此這裡
 #       的失敗一律 fail closed（擋住並明示 prompt 未送出），不得因環境差異放行。
 #
-# 匯出：THROTTLE_STATE_DIR / THROTTLE_LOG
+# 匯出：THROTTLE_STATE_DIR
 #       resolve_principal / load_throttle_config / effective_refill
-#       bucket_take / bucket_project / bucket_reset / throttle_gc / usage_log
+#       bucket_take / bucket_project / bucket_reset / throttle_gc
 #
 # 使用前提：引用者需自行確保 SCRIPTS_DIR 已定義（指向本 skill 的 scripts/ 目錄）。
 
 # 桶是可丟棄的執行狀態，與 enabled.json（使用者意圖）分開放——混放會讓備份或
 # 同步設定時把配額水位一起搬走
 THROTTLE_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota"
-THROTTLE_LOG="$THROTTLE_STATE_DIR/usage.log"
 THROTTLE_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/mh-external-advisor/throttle.json"
 
 # scope 值固定 ASCII：中文只出現在文件，避開 locale、引號與正規化問題
@@ -26,39 +25,54 @@ valid_scope() {
 
 # ── 身分：桶屬於哪個 AI Agent ──────────────────────────────────────
 
-# 沿祖先鏈取「第一個非 shell 祖先」，設定 PRINCIPAL_PID / PRINCIPAL_LSTART。
+# 預設的 agent 名單；使用者可用 throttle.json 的 principal_names 覆寫
+THROTTLE_AGENT_NAMES_DEFAULT="claude codex opencode agy"
+
+# 走完整條祖先鏈，取**最外層**那個名字在 agent 名單內的祖先，設定 PRINCIPAL_KIND／
+# PRINCIPAL_ID／PRINCIPAL_COMM／PRINCIPAL_LSTART。
 #
-# 不以已知 CLI 名單比對：名單會過期，且 node 本身就可能是 agent 本體。改以
-# 「跳過連續 shell」定位——呼叫鏈是 agent → shell → 本腳本，第一個非 shell
-# 即呼叫端。取不到時回非零由呼叫端 fail closed；🚫 不得放行，否則環境差異
-# 就成了繞過節流的途徑。
+# 用「正面表列 agent」而非「跳過已知 wrapper」：黑名單漏列一個 fork 後仍留在
+# 祖先鏈上的 wrapper（timeout、xargs、flock、sudo），就會把它當成 principal，
+# 而那類程序每次呼叫都是新 PID，於是每次都開新桶、桶永遠是滿的——節流失效卻
+# 無聲。白名單漏列的後果相反：找不到就退到 UID 共用桶，粒度變粗但仍受節流。
+#
+# 取最外層而非第一個命中：停在第一個命中時，內層再起一個 agent 就換到新桶，
+# 套幾層就有幾份配額——那是條無聲的繞過路徑。最外層的 agent 是使用者實際啟動
+# 的那一個，它底下派生多少層都算同一份。
 resolve_principal() {
-  local pid ppid comm depth=0
+  local pid ppid comm depth=0 names found_pid="" found_comm=""
+  names="${TH_PRINCIPAL_NAMES:-$THROTTLE_AGENT_NAMES_DEFAULT}"
   pid="$$"
-  while [ "$depth" -lt 20 ]; do
+  while [ "$depth" -lt 40 ]; do
     # macOS 的 comm 給完整路徑，取 basename 後比對；login shell 另有 - 前綴
     read -r ppid comm <<<"$(ps -o ppid=,comm= -p "$pid" 2>/dev/null)"
-    [ -n "${ppid:-}" ] || return 1
+    [ -n "${ppid:-}" ] || break
     comm="${comm##*/}"; comm="${comm#-}"
-    case "$comm" in
-      sh|bash|zsh|dash|ksh|fish) ;;
-      # 本 skill 自己的 wrapper 也要跳過：實測 Linux 下 comm 為 bash（腳本由 bash
-      # 執行），但若某平台或 shell 把 argv[0] 設成腳本名，principal 會落在這次
-      # 短命的 wrapper 上——每次呼叫都變成新桶，節流形同失效
-      advisor-*.sh|ask-*.sh|advisor-*|ask-*) ;;
-      "") return 1 ;;
-      *) PRINCIPAL_PID="$pid"; PRINCIPAL_COMM="$comm"; break ;;
+    # comm 在下面的 case 裡位於 pattern 位置，含 glob 字元會造成非預期匹配：
+    # 名字帶 * ? [ 的一律不參與比對（agent 名不會長這樣）
+    case "$comm" in *[!A-Za-z0-9._-]*) comm="" ;; esac
+    # 命中不停手，繼續往上覆寫——迴圈結束時留下的就是最外層那個
+    case " $names " in
+      *" $comm "*) [ -n "$comm" ] && { found_pid="$pid"; found_comm="$comm"; } ;;
     esac
+    # 追到 init 或容器入口就沒有更上層可找了
+    [ "$pid" = "1" ] && break
     pid="$ppid"
-    # PID 0/1 代表已追到 init 或容器入口，中間沒有可辨識的 agent
-    [ "$pid" = "0" ] || [ "$pid" = "1" ] && return 1
+    [ "$pid" = "0" ] && break
     depth=$((depth + 1))
   done
-  [ -n "${PRINCIPAL_PID:-}" ] || return 1
-  # lstart 當 incarnation key：同一 PID 被重用時據此判定舊桶失效。
-  # 不用 /proc/<pid>/stat（Linux only）——這裡不是安全身分驗證，秒級足夠
-  PRINCIPAL_LSTART="$(ps -o lstart= -p "$PRINCIPAL_PID" 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$//')"
-  [ -n "$PRINCIPAL_LSTART" ] || return 1
+  if [ -n "$found_pid" ]; then
+    PRINCIPAL_KIND="agent"; PRINCIPAL_ID="$found_pid"; PRINCIPAL_COMM="$found_comm"
+    # lstart 當 incarnation key：同一 PID 被重用時據此判定舊桶失效。
+    # 不用 /proc/<pid>/stat（Linux only）——這裡不是安全身分驗證，秒級足夠
+    PRINCIPAL_LSTART="$(ps -o lstart= -p "$found_pid" 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$//')"
+    [ -n "$PRINCIPAL_LSTART" ] || return 1
+    return 0
+  fi
+  # 名單外的 agent：退到 UID 共用桶。誤共桶只是粒度變粗，誤拆桶則讓節流整個失效
+  PRINCIPAL_KIND="uid"; PRINCIPAL_ID="$(id -u 2>/dev/null)"; PRINCIPAL_COMM="uid"
+  PRINCIPAL_LSTART="-"          # UID 不會被重用，無 incarnation 語意
+  [ -n "$PRINCIPAL_ID" ] || return 1
   return 0
 }
 
@@ -94,7 +108,7 @@ _th_int() {
 # 設定壞掉不應讓諮詢全面停擺，但也不得因此變寬鬆——預設值本身就是保守值。
 load_throttle_config() {
   TH_CAPACITY=30          # 容量：最大 burst＝capacity/cost 次，🚫 不隨額度倍率改變
-  TH_COST=10              # 每次諮詢扣多少
+  TH_COST=7               # 每次諮詢扣多少
   TH_REFILL=60            # 基數：每 60 秒回 1 單位
   TH_LOW_BELOW=40         # 額度剩餘低於此 → 速率減半
   TH_HIGH_AT=70           # 額度剩餘達此 → 速率加倍
@@ -103,12 +117,13 @@ load_throttle_config() {
   TH_LOCK_TIMEOUT=5
   TH_GC_INTERVAL=21600
   TH_GC_MAX_AGE=604800
+  TH_PRINCIPAL_NAMES="$THROTTLE_AGENT_NAMES_DEFAULT"
   [ -f "$THROTTLE_CONFIG" ] || return 0
   local v
   v="$(jq -r '
     def n(p; d): (p // d) | if type == "number" then . else d end;
     [ n(.scopes.default.capacity; 30),
-      n(.scopes.default.cost; 10),
+      n(.scopes.default.cost; 7),
       n(.scopes.default.refill_seconds; 60),
       n(.quota_thresholds.low_below; 40),
       n(.quota_thresholds.high_at; 70),
@@ -135,8 +150,15 @@ load_throttle_config() {
   # 欄位間關係：cost 大於 capacity 會讓桶永遠取不到，兩者都退回預設較可預測
   if [ "$TH_COST" -gt "$TH_CAPACITY" ]; then
     echo "[warn] throttle 設定的 cost（${TH_COST}）大於 capacity（${TH_CAPACITY}），兩者改用預設" >&2
-    TH_CAPACITY=30; TH_COST=10
+    TH_CAPACITY=30; TH_COST=7
   fi
+  # agent 名單：決定 principal 認得出哪些呼叫端，漏列只會退到 UID 共用桶
+  local _names
+  _names="$(jq -r '(.principal_names // []) | map(select(type == "string")) | join(" ")' \
+    "$THROTTLE_CONFIG" 2>/dev/null)"
+  # 只收安全字元：名單要拿去比對 comm，夾雜空白或萬用字元會讓比對錯開
+  _names="$(printf '%s' "${_names:-}" | tr -cd 'A-Za-z0-9._ -')"
+  [ -n "${_names// /}" ] && TH_PRINCIPAL_NAMES="$_names"
   return 0
 }
 
@@ -254,8 +276,11 @@ bucket_unlock() {
 
 # ── 桶 ──────────────────────────────────────────────────────────
 
+# 目錄名帶 scheme 前綴（agent-<pid>／uid-<uid>）：兩種身分來源的桶不會混在一起，
+# 舊版的純數字 PID 目錄也因此天然不再被讀到，由 GC 收走
 bucket_path() {
-  printf '%s/buckets/%s/%s-%s.json' "$THROTTLE_STATE_DIR" "$PRINCIPAL_PID" "$1" "$2"
+  printf '%s/buckets/%s-%s/%s-%s.json' \
+    "$THROTTLE_STATE_DIR" "$PRINCIPAL_KIND" "$PRINCIPAL_ID" "$1" "$2"
 }
 
 # 取用或試算一個桶。
@@ -266,13 +291,13 @@ bucket_path() {
 # 若一開始就用新值，等於拿現在的額度檔位回溯改寫過去那段時間的水位。
 bucket_take() {
   local ai="$1" scope="$2" mode="$3"
-  local cap cost refill_base f now remaining refill updated new_updated elapsed gain rem carry new_refill lstart retry avail
+  local cap cost refill_base f now remaining before refill updated new_updated elapsed gain rem carry new_refill lstart retry avail
 
   cap="$(scope_param "$scope" capacity "$TH_CAPACITY")"
   cost="$(scope_param "$scope" cost "$TH_COST")"
   refill_base="$(scope_param "$scope" refill_seconds "$TH_REFILL")"
   # 欄位關係要在「套用 scope 覆寫之後」再驗一次：只驗 default 的話，單設
-  # review.capacity=5（cost 沿用 10）會讓該 scope 每次都取不到、永遠 exit 5。
+  # review.capacity=5（cost 沿用 7）會讓該 scope 每次都取不到、永遠 exit 5。
   # TH_CAPACITY/TH_COST 在載入時已驗過關係，退回它們是安全的
   if [ "$cost" -gt "$cap" ] 2>/dev/null; then
     echo "[warn] scope ${scope} 的 cost（${cost}）大於 capacity（${cap}），該 scope 改用預設 ${TH_CAPACITY}/${TH_COST}" >&2
@@ -301,7 +326,8 @@ bucket_take() {
   remaining="$cap"; refill="$new_refill"; updated="$now"
   if [ -f "$f" ]; then
     lstart="$(jq -r '.principal.lstart // empty' "$f" 2>/dev/null)"
-    # lstart 不符＝這個 PID 已被重用給別的程序，舊桶失效，重新開一個滿桶
+    # lstart 不符＝這個 PID 已被重用給別的程序，舊桶失效，重新開一個滿桶。
+    # UID 桶兩邊都是 "-"（UID 不會被重用），自然恆等、永遠沿用同一個桶
     if [ "$lstart" = "$PRINCIPAL_LSTART" ]; then
       remaining="$(jq -r '.remaining // empty' "$f" 2>/dev/null)"
       refill="$(jq -r '.refill_seconds // empty' "$f" 2>/dev/null)"
@@ -337,6 +363,9 @@ bucket_take() {
   # 滿桶後餘數沒有意義，時間錨點直接對齊現在
   if [ "$remaining" -ge "$cap" ]; then remaining="$cap"; new_updated="$now"; fi
 
+  # 補水後、扣款前的水位：少了它就分不出「靠補水剛好放行」與「桶本來就滿」，
+  # 也無法驗證實際扣量（相鄰兩筆的 remaining 差值會被中間的補水混淆）
+  before="$remaining"
   if [ "$remaining" -ge "$cost" ]; then
     [ "$mode" = "take" ] && remaining=$((remaining - cost))
     retry=0
@@ -349,8 +378,8 @@ bucket_take() {
 
   # peek 只投影不寫檔——公式對同一時間點是冪等的，唯讀查詢不必改 updated_at
   if [ "$mode" = "take" ]; then
-    printf '{"version":1,"principal":{"pid":%s,"lstart":"%s"},"scope":"%s","advisor":"%s","remaining":%s,"updated_at":%s,"refill_seconds":%s}\n' \
-      "$PRINCIPAL_PID" "$PRINCIPAL_LSTART" "$scope" "$ai" "$remaining" "$new_updated" "$new_refill" \
+    printf '{"version":2,"principal":{"kind":"%s","id":%s,"lstart":"%s"},"scope":"%s","advisor":"%s","remaining":%s,"updated_at":%s,"refill_seconds":%s}\n' \
+      "$PRINCIPAL_KIND" "$PRINCIPAL_ID" "$PRINCIPAL_LSTART" "$scope" "$ai" "$remaining" "$new_updated" "$new_refill" \
       > "$f.tmp.$$" 2>/dev/null \
       && mv -f "$f.tmp.$$" "$f" 2>/dev/null \
       || { rm -f "$f.tmp.$$" 2>/dev/null; bucket_unlock; echo "[warn] 桶狀態寫入失敗：$f" >&2; return 2; }
@@ -358,12 +387,12 @@ bucket_take() {
   fi
 
   if [ "$retry" -eq 0 ]; then
-    printf '{"allowed":true,"scope":"%s","advisor":"%s","remaining":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
-      "$scope" "$ai" "$remaining" "$cap" "$cost" "$new_refill"
+    printf '{"allowed":true,"scope":"%s","advisor":"%s","remaining":%s,"remaining_before":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
+      "$scope" "$ai" "$remaining" "$before" "$cap" "$cost" "$new_refill"
     return 0
   fi
-  printf '{"allowed":false,"scope":"%s","advisor":"%s","retry_after_seconds":%s,"available_at":%s,"remaining":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
-    "$scope" "$ai" "$retry" "$avail" "$remaining" "$cap" "$cost" "$new_refill"
+  printf '{"allowed":false,"scope":"%s","advisor":"%s","retry_after_seconds":%s,"available_at":%s,"remaining":%s,"remaining_before":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
+    "$scope" "$ai" "$retry" "$avail" "$remaining" "$before" "$cap" "$cost" "$new_refill"
   return 1
 }
 
@@ -382,7 +411,7 @@ bucket_reset() {
 # 只清「PID 已被重用」或「超過保存期」的桶——ps 暫時失敗不得據以刪除，
 # 否則會誤刪仍在使用中的桶。
 throttle_gc() {
-  local stamp="$THROTTLE_STATE_DIR/.gc" now last d pid f lstart mtime
+  local stamp="$THROTTLE_STATE_DIR/.gc" now last d key pid f lstart mtime
   now="$(date +%s)"
   last=0
   [ -f "$stamp" ] && last="$(cat "$stamp" 2>/dev/null || echo 0)"
@@ -390,12 +419,20 @@ throttle_gc() {
   { printf '%s\n' "$now" > "$stamp"; } 2>/dev/null
   for d in "$THROTTLE_STATE_DIR"/buckets/*/; do
     [ -d "$d" ] || continue
-    pid="$(basename "$d")"
+    key="$(basename "$d")"
+    # 只有 agent 桶查得了 incarnation：UID 不會被重用，舊版的純數字 PID 目錄則
+    # 已不再被任何 bucket_path 產生，兩者都只走保存期
+    case "$key" in
+      agent-*) pid="${key#agent-}" ;;
+      *)       pid="" ;;
+    esac
     for f in "$d"*.json; do
       [ -f "$f" ] || continue
-      lstart="$(jq -r '.principal.lstart // empty' "$f" 2>/dev/null)"
-      same_incarnation "$pid" "$lstart"
-      if [ $? -eq 1 ]; then rm -f "$f" 2>/dev/null; continue; fi
+      if [ -n "$pid" ]; then
+        lstart="$(jq -r '.principal.lstart // empty' "$f" 2>/dev/null)"
+        same_incarnation "$pid" "$lstart"
+        if [ $? -eq 1 ]; then rm -f "$f" 2>/dev/null; continue; fi
+      fi
       # 保底保存期：平台查不到程序時仍能清掉長期垃圾。
       # 用 -mtime（BSD/GNU find 皆支援）而非 -newermt（GNU 專有）——精度到天已足夠
       mtime="$(find "$f" -mtime "+$((TH_GC_MAX_AGE / 86400))" 2>/dev/null)"
@@ -403,19 +440,5 @@ throttle_gc() {
     done
     rmdir "$d" 2>/dev/null
   done
-  return 0
-}
-
-# 用量記錄：allow 與 deny 都記——只記成功就看不出節流有沒有真的擋到，
-# 也無從回頭調參數。🚫 不記 prompt 內容：這份檔案比對話脈絡持久。
-usage_log() {
-  local line size
-  line="$(date '+%Y-%m-%dT%H:%M:%S%z')  ${AGENT_LABEL:-agent}(${PRINCIPAL_PID:-?})  $*"
-  mkdir -p "$THROTTLE_STATE_DIR" 2>/dev/null || return 0
-  # 依大小輪替，留一份舊檔：長期執行不做輪替會無限成長
-  size=0
-  [ -f "$THROTTLE_LOG" ] && size="$(wc -c < "$THROTTLE_LOG" 2>/dev/null || echo 0)"
-  [ "${size:-0}" -gt 1048576 ] 2>/dev/null && mv -f "$THROTTLE_LOG" "$THROTTLE_LOG.1" 2>/dev/null
-  { printf '%s\n' "$line" >> "$THROTTLE_LOG"; } 2>/dev/null
   return 0
 }

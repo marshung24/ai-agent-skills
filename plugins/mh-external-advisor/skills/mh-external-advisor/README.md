@@ -14,6 +14,7 @@ mh-external-advisor/
 │   ├── advisor-set.sh       # setter：設定啟用清單（耐久儲存）
 │   ├── advisor-quota.sh     # 查各顧問的訂閱額度餘量（只查額度，不諮詢）
 │   ├── advisor-throttle.sh  # 漏桶節流：查水位／取用額度／重置（扣桶由 ask-*.sh 內部完成）
+│   ├── advisor-usage.sh     # 用量診斷（唯讀）：節流證據、呼叫結果、分桶完整性
 │   ├── lib/enabled-io.sh    # getter/setter 共用：名稱驗證、支援掃描、設定檔讀取
 │   ├── lib/throttle-io.sh   # 節流共用：身分解析、桶讀寫、目錄鎖、額度倍率
 │   ├── ask-codex.sh         # 詢問 Codex（codex exec）
@@ -25,7 +26,9 @@ mh-external-advisor/
 │   └── autonomous-mode.md   # 自主模式執行辦法（啟動後才按需載入）
 └── docs/
     ├── design.md            # 設計文件：架構、DECISION 記錄、驗證證據鏈
-    └── internals.md         # 實作細節（維護用）：腳本內部行為、額度介面、底層指令
+    ├── internals.md         # 實作細節（維護用）：腳本內部行為、額度介面、底層指令
+    ├── usage-log.md         # 用量與錯誤記錄的資料契約：事件模型、欄位字典、涵蓋範圍
+    └── usage-analysis.md    # 用量分析：算得出什麼、哪些指標會誤導、報表與圖表界線
 ```
 
 ## 快速使用
@@ -52,9 +55,9 @@ scripts/ask-codex.sh --scope unblock -r <id> "那如果併發呼叫呢？"
 
 每次諮詢在送出 prompt 前，由 `ask-*.sh` **內部**扣一次漏桶額度——不是選配步驟，跳不過。這是為了讓自主模式有一層不依賴呼叫端自我判斷的速率上限：其餘限制（該不該問、是不是同一個問題）都要 AI 自己判斷，只有這一層純粹數次數與看時鐘。
 
-桶依 `(呼叫端 agent 的 PID, scope, 顧問)` 隔離——每支顧問的訂閱額度獨立計算，互不排擠；同一台機器上多個 agent 也互不干擾。
+桶依 `(呼叫端 agent, scope, 顧問)` 隔離——每支顧問的訂閱額度獨立計算，互不排擠；同一台機器上多個 agent 也互不干擾。「呼叫端 agent」取祖先鏈**最外層**那個名字在名單內的程序（預設 `claude`／`codex`／`opencode`／`agy`），所以中間夾了 `timeout` 這類 wrapper、或 agent 又派生 agent，水位都算在同一份上。名單外的 agent 會退到該 UID 的共用桶並在 stderr 警告——把它的程序名加進 `principal_names` 即可恢復獨立計量。
 
-**預設**：容量 30、每次扣 10、每 60 秒回 1 單位——即連續 3 次後見底，之後每 10 分鐘回一次呼叫的量。額度餘量高時恢復更快（`>=70%` 間隔減半、`<40%` 加倍），但**容量不變**。
+**預設**：容量 30、每次扣 7、每 60 秒回 1 單位——即連續 4 次後不足再取，之後每 7 分鐘回一次呼叫的量。額度餘量高時恢復更快（`>=70%` 間隔減半、`<40%` 加倍），但**容量不變**。
 
 ```bash
 # 查水位（唯讀，不查網路、不建任何檔案）
@@ -73,7 +76,7 @@ scripts/advisor-throttle.sh reset --all
 {
   "version": 1,
   "scopes": {
-    "default": { "capacity": 30, "cost": 10, "refill_seconds": 60 },
+    "default": { "capacity": 30, "cost": 7, "refill_seconds": 60 },
     "review":  { "refill_seconds": 90 }
   }
 }
@@ -81,7 +84,37 @@ scripts/advisor-throttle.sh reset --all
 
 缺檔即用內建預設。每個欄位都必須是正整數，`0`、負數、小數或 `cost > capacity` 會**個別退回預設並在 stderr 印 `[warn]`**——設定寫錯不該讓所有諮詢停擺。完整欄位、結束碼與內部行為見 [references/detail.md](references/detail.md)〈節流〉。
 
-用量記錄在 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/usage.log`，allow 與 deny 都記，**不含 prompt 內容**，超過 1MB 輪替。
+不想手寫 JSON 就用設定工具：
+
+```bash
+# 看生效中的設定與各值來源（含各 scope 繼承後的最終值）
+scripts/advisor-throttle-config.sh show
+
+# 改一個欄位；值若不會生效會當場被擋下，不寫入
+scripts/advisor-throttle-config.sh set scopes.review.refill_seconds 90
+scripts/advisor-throttle-config.sh unset scopes.review
+
+# 檢查設定並修復已失效的欄位
+scripts/advisor-throttle-config.sh check
+```
+
+`check` **只移除 reader 現在就已經在忽略或退回預設的欄位**，修完的節流行為與修之前完全相同；生效中的值、以及本工具不認得的欄位一律只回報、不更動。它也會在 `make install`／`make update` 裝到本 skill 時自動跑一次——設定放在家目錄，不隨 skill 更新，版本前進後可能留下已失效的欄位。
+
+用量記錄在 `${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota/usage.log`，為 JSONL 事件流，**不含 prompt 內容**，超過 1MB 輪替。同一次呼叫依生命週期寫 `throttle_decision`／`call_attempted`／`call_finished` 三筆，共用 `invocation_id`。能證明往返完成的只有結束碼 0 的 `call_finished`。
+
+要看用量診斷：
+
+```bash
+scripts/advisor-usage.sh                    # 全部
+scripts/advisor-usage.sh --advisor codex    # 只看某支顧問
+scripts/advisor-usage.sh --since 2026-09-01 # 只看某日之後
+scripts/advisor-usage.sh --json             # 機器可讀
+```
+
+它唯讀、只描述已記錄的事件，**不自動建議節流參數**——log 裡沒有「可接受的等待」與政策目標，同一串連續呼叫既可讀成容量該調大，也可讀成正該擋。
+
+- 欄位字典、錯誤記錄涵蓋到哪：[docs/usage-log.md](docs/usage-log.md)
+- 哪些數字算得出來、哪些會誤導：[docs/usage-analysis.md](docs/usage-analysis.md)
 
 ## 需求
 

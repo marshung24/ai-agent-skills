@@ -44,6 +44,8 @@ BRAIN="${HOME:-}/.gemini/antigravity-cli/brain"
 
 # 路徑自解析：以腳本自身位置為準，不信任 cwd
 SCRIPTS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/usage-log.sh
+. "$SCRIPTS_DIR/lib/usage-log.sh"
 
 # ── 前置檢查：依賴不存在時立即明確報錯 ──
 command -v agy >/dev/null || { echo "錯誤：找不到 agy CLI，請先安裝並登入" >&2; exit 127; }
@@ -128,7 +130,10 @@ fi
 # 嵌在 adapter 內部而非交由呼叫端自行呼叫——由呼叫端決定要不要節流，等於沒有節流。
 # 任何失敗一律不送出：fail open 會讓環境差異成為繞過節流的途徑
 [ -n "$SCOPE" ] || { echo "錯誤：缺少 --scope（explore|unblock|review）" >&2; exit 2; }
-THROTTLE_OUT="$("$SCRIPTS_DIR/advisor-throttle.sh" consume --advisor agy --scope "$SCOPE")"
+# invocation_id 在扣桶前產生：扣桶決策與最終結果要靠它配對，並行時用時間或 PID 配不起來
+USAGE_INVOCATION_ID="$(usage_new_invocation_id)"
+THROTTLE_OUT="$("$SCRIPTS_DIR/advisor-throttle.sh" consume --advisor agy --scope "$SCOPE" \
+  --source adapter --invocation-id "$USAGE_INVOCATION_ID")"
 case $? in
   0) ;;
   5) printf '%s\n' "$THROTTLE_OUT"
@@ -144,7 +149,11 @@ COMMON=(--dangerously-skip-permissions --output-format json)
 
 # 暫存 stdout / stderr：stdout 為單行 JSON，stderr 供失敗診斷（不吞掉）
 OUT="$(mktemp)"; ERR="$(mktemp)"
-trap 'rm -f "$OUT" "$ERR"' EXIT
+# 結束事件掛在 trap：中途 exit 的路徑太多（CLI 失敗、resume 失效、解析失敗），逐條補必漏
+trap 'usage_call_finished "$?"; rm -f "$OUT" "$ERR"' EXIT
+
+# 到這裡才算「即將把 prompt 交給顧問 CLI」——扣桶成功不等於送出，兩者中間還會失敗
+usage_call_attempted agy "$([ -n "$RESUME" ] && echo resume || echo new)"
 
 # ── 執行 agy：prompt 作為 -p 的值傳入 ──
 agy "${COMMON[@]}" -p "$PROMPT" >"$OUT" 2>"$ERR"

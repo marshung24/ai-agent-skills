@@ -5,16 +5,15 @@
 #       它不依賴呼叫端自律——扣桶動作嵌在 adapter 內部，呼叫端繞不過；因此這裡
 #       的失敗一律 fail closed（擋住並明示 prompt 未送出），不得因環境差異放行。
 #
-# 匯出：THROTTLE_STATE_DIR / THROTTLE_LOG
+# 匯出：THROTTLE_STATE_DIR
 #       resolve_principal / load_throttle_config / effective_refill
-#       bucket_take / bucket_project / bucket_reset / throttle_gc / usage_log
+#       bucket_take / bucket_project / bucket_reset / throttle_gc
 #
 # 使用前提：引用者需自行確保 SCRIPTS_DIR 已定義（指向本 skill 的 scripts/ 目錄）。
 
 # 桶是可丟棄的執行狀態，與 enabled.json（使用者意圖）分開放——混放會讓備份或
 # 同步設定時把配額水位一起搬走
 THROTTLE_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/mh-external-advisor/quota"
-THROTTLE_LOG="$THROTTLE_STATE_DIR/usage.log"
 THROTTLE_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/mh-external-advisor/throttle.json"
 
 # scope 值固定 ASCII：中文只出現在文件，避開 locale、引號與正規化問題
@@ -292,7 +291,7 @@ bucket_path() {
 # 若一開始就用新值，等於拿現在的額度檔位回溯改寫過去那段時間的水位。
 bucket_take() {
   local ai="$1" scope="$2" mode="$3"
-  local cap cost refill_base f now remaining refill updated new_updated elapsed gain rem carry new_refill lstart retry avail
+  local cap cost refill_base f now remaining before refill updated new_updated elapsed gain rem carry new_refill lstart retry avail
 
   cap="$(scope_param "$scope" capacity "$TH_CAPACITY")"
   cost="$(scope_param "$scope" cost "$TH_COST")"
@@ -364,6 +363,9 @@ bucket_take() {
   # 滿桶後餘數沒有意義，時間錨點直接對齊現在
   if [ "$remaining" -ge "$cap" ]; then remaining="$cap"; new_updated="$now"; fi
 
+  # 補水後、扣款前的水位：少了它就分不出「靠補水剛好放行」與「桶本來就滿」，
+  # 也無法驗證實際扣量（相鄰兩筆的 remaining 差值會被中間的補水混淆）
+  before="$remaining"
   if [ "$remaining" -ge "$cost" ]; then
     [ "$mode" = "take" ] && remaining=$((remaining - cost))
     retry=0
@@ -385,12 +387,12 @@ bucket_take() {
   fi
 
   if [ "$retry" -eq 0 ]; then
-    printf '{"allowed":true,"scope":"%s","advisor":"%s","remaining":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
-      "$scope" "$ai" "$remaining" "$cap" "$cost" "$new_refill"
+    printf '{"allowed":true,"scope":"%s","advisor":"%s","remaining":%s,"remaining_before":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
+      "$scope" "$ai" "$remaining" "$before" "$cap" "$cost" "$new_refill"
     return 0
   fi
-  printf '{"allowed":false,"scope":"%s","advisor":"%s","retry_after_seconds":%s,"available_at":%s,"remaining":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
-    "$scope" "$ai" "$retry" "$avail" "$remaining" "$cap" "$cost" "$new_refill"
+  printf '{"allowed":false,"scope":"%s","advisor":"%s","retry_after_seconds":%s,"available_at":%s,"remaining":%s,"remaining_before":%s,"capacity":%s,"cost":%s,"refill_seconds":%s}\n' \
+    "$scope" "$ai" "$retry" "$avail" "$remaining" "$before" "$cap" "$cost" "$new_refill"
   return 1
 }
 
@@ -438,19 +440,5 @@ throttle_gc() {
     done
     rmdir "$d" 2>/dev/null
   done
-  return 0
-}
-
-# 用量記錄：allow 與 deny 都記——只記成功就看不出節流有沒有真的擋到，
-# 也無從回頭調參數。🚫 不記 prompt 內容：這份檔案比對話脈絡持久。
-usage_log() {
-  local line size
-  line="$(date '+%Y-%m-%dT%H:%M:%S%z')  ${AGENT_LABEL:-agent}(${PRINCIPAL_ID:-?})  $*"
-  mkdir -p "$THROTTLE_STATE_DIR" 2>/dev/null || return 0
-  # 依大小輪替，留一份舊檔：長期執行不做輪替會無限成長
-  size=0
-  [ -f "$THROTTLE_LOG" ] && size="$(wc -c < "$THROTTLE_LOG" 2>/dev/null || echo 0)"
-  [ "${size:-0}" -gt 1048576 ] 2>/dev/null && mv -f "$THROTTLE_LOG" "$THROTTLE_LOG.1" 2>/dev/null
-  { printf '%s\n' "$line" >> "$THROTTLE_LOG"; } 2>/dev/null
   return 0
 }

@@ -57,15 +57,15 @@ description: 程式碼審查（code review / 代碼審核 / 程式審核）。�
 
 ## 審查核心（摘要）
 
-先看行為回歸 / 安全 / 邏輯（🔴），再看架構 / 維護性 / 效能（🟡🟢）。PR review 的阻擋門檻要保守。
+掃描前先固定審查對象、完成判準與審查範圍，再看行為回歸 / 安全 / 邏輯，最後架構 / 維護性 / 效能。找到問題先依判定順序取得處置，再選 🔴🟡🟢 呈現——**標記是輸出格式，不是裁決語意**。正式裁決依 `mp-ai-guidelines` 問題裁決指南。
 
-> 完整審查框架、嚴重度定義、檢查清單：[references/review-framework.md](references/review-framework.md)
+> 錨定規則、裁決處置與判定順序、配額、檢查清單：[references/review-framework.md](references/review-framework.md)
 
 ---
 
 ## 自我 Review
 
-適用：RD 開發過程中即時檢查當前修改。聚焦 🔴，🟡 門檻寬鬆，只報告不操作 git/gh。
+適用：RD 開發過程中即時檢查當前修改。聚焦本輪阻斷與受保護後果，其餘門檻寬鬆，只報告不操作 git/gh。
 
 > 完整流程、輸入規則、輸出模板：[references/self-review.md](references/self-review.md)
 
@@ -73,6 +73,6 @@ description: 程式碼審查（code review / 代碼審核 / 程式審核）。�
 
 ## PR Review
 
-適用：審查 GitHub Pull Request。完整 🔴🟡🟢 檢查，預設止步於 findings 報告，代發需使用者明確要求。
+適用：審查 GitHub Pull Request。六個審查面向全掃，預設止步於 findings 報告，代發需使用者明確要求。
 
 > 完整流程、結論判定、輸出模板、gh API 操作：[references/pr-review.md](references/pr-review.md)

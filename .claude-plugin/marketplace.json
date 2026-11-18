@@ -79,6 +79,24 @@
       "homepage": "https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-humanizer-zh-tw",
       "repository": "https://github.com/marshung24/ai-agent-skills",
       "license": "MIT"
+    },
+    {
+      "name": "mh-telegram-ai-team",
+      "source": "./plugins/mh-telegram-ai-team",
+      "description": "用 Telegram 建立 AI 協作團隊：協助建置 bot 與 Claude Code／Codex 串接，並提供協作規範、通訊流程與訊息模版。",
+      "category": "productivity",
+      "keywords": [
+        "telegram",
+        "multi-agent",
+        "collaboration"
+      ],
+      "author": {
+        "name": "mars.hung",
+        "url": "https://github.com/marshung24"
+      },
+      "homepage": "https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-telegram-ai-team",
+      "repository": "https://github.com/marshung24/ai-agent-skills",
+      "license": "MIT"
     }
   ]
 }

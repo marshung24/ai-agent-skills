@@ -21,6 +21,7 @@ Templates 是一般 Markdown 檔，不是 skill，也不經安裝流程。
 | [mh-code-review](plugins/mh-code-review/skills/mh-code-review/) | 程式碼審查（自我 review / PR review），依風險優先序檢查，支援 GitHub PR 操作 |
 | [mh-external-advisor](plugins/mh-external-advisor/skills/mh-external-advisor/) | 外部 AI 顧問：非互動諮詢另一支 AI CLI（第二意見／交叉驗證），以明確 id 延續對話。⚠️ 以免互動核可旗標執行，僅限 sandbox／受控環境 |
 | [mh-humanizer-zh-tw](plugins/mh-humanizer-zh-tw/skills/mh-humanizer-zh-tw/) | 技術文件台灣化與保真微編輯（技術文章、規範、規畫設計、教案、程式註解）：詞彙台灣化、好懂化微調、語意保真；完整去 AI 腔為進階模式（38 種啟用模式） |
+| [mh-telegram-ai-team](plugins/mh-telegram-ai-team/skills/mh-telegram-ai-team/) | 用 Telegram 建立 AI 協作團隊：協助建置 bot 與 Claude Code／Codex 串接，並提供協作規範、通訊流程與訊息模版 |
 
 怎麼選：要一次管好四家、或日後要 `update`／`remove` → 用 repo 附的工具；只用 Claude Code／Codex 且不想 clone → 直接跳到〈自己動手〉的 marketplace 那段。
 

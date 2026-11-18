@@ -117,7 +117,8 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 溝通員每處理完一則 Telegram 入站，由 [scripts/log-run.sh](../scripts/log-run.sh) 追加一列到 `~/.local/state/mh-telegram-ai-team/runs.jsonl`（`MH_TG_RUNS_LOG` 可改）。僅 Claude Code；Codex bridge 的執行路徑與事件未查，不支援。
 
 - **掛法**：只掛在接 Telegram 的 session，與 plugin 啟用放同一份 `--settings`，例：`{"enabledPlugins":{"telegram@claude-plugins-official":true},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"<log-run.sh 絕對路徑>"}]}]}}`；🚫 不放全域 settings
-- **依賴**：`jq`；額度快照另需 `claude` CLI（每次約 3 秒）
+- **依賴**：`jq`；額度快照經 [scripts/quota.sh](../scripts/quota.sh)，需 `claude` CLI（每次約 3 秒）
+- **即時查額度**：要知道 Claude／Codex 目前剩多少額度時跑 `quota.sh`（`--json` 機器可讀），得各窗口剩餘百分比與重置時間；不需掛 hook，Codex 端也可用
 
 | 欄位 | 來源 | 限制 |
 |---|---|---|
@@ -127,7 +128,7 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 | `replies`、`mentions_out` | 回覆工具的呼叫與 `text` 內的 `@username` | text mention 不計 |
 | `transcript_complete` | 以 hook 的 `last_assistant_message` 比對 transcript 結尾，最多等 10 秒 | `false`＝transcript 尚未落盤，`usage`／`replies`／`mentions_out` 可能漏計，不可當最終統計；無最終文字時為 `null` |
 | 來源判定 | transcript 內文含 channel 標籤字串即視為入站 | CLI 貼入偽標籤也會被記成入站，統計前排除可疑列 |
-| `quota` | `claude -p /usage`（須 `num_turns==0` 才採信） | 各窗口**剩餘百分比**與重置時間，無法換算成剩餘 token；取不到記 `null` |
+| `quota` | `quota.sh` 的 claude 部分（`/usage` 須 `num_turns==0` 才採信） | 各窗口**剩餘百分比**與重置時間，無法換算成剩餘 token；取不到記 `null` |
 
 - **每人用量另有來源**：強化版自行統計每位發話者每日 token（含子 agent，存 `messages.db`），Telegram 內 `/usage` 可查；本紀錄補逐回合明細、`@` 對象與額度快照
 - **前提未實測**：channel 入站處理完是否觸發 Stop hook，尚未在真實 session 驗證；解析邏輯已用既有 transcript 驗證

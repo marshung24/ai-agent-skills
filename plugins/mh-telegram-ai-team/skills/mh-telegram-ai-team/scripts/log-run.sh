@@ -4,7 +4,7 @@
 # 輸入：stdin 為 Stop hook JSON（取 session_id、transcript_path、last_assistant_message）
 # 輸出：追加到 ${MH_TG_RUNS_LOG:-~/.local/state/mh-telegram-ai-team/runs.jsonl}，stdout 不輸出
 # 紀錄單位：transcript 中最後一則 Telegram 入站之後的所有 assistant 回應（合批時為最後一則的發話者）
-# 依賴：jq；額度快照另需 claude CLI（失敗記 null，不影響其餘欄位）
+# 依賴：jq；額度快照經 quota.sh（需 claude CLI，失敗記 null，不影響其餘欄位）
 #
 # 用法（只掛在接 Telegram 的 session，見 setup.md〈執行紀錄〉）：
 #   "hooks":{"Stop":[{"hooks":[{"type":"command","command":"<本檔絕對路徑>"}]}]}
@@ -65,17 +65,9 @@ run="$(jq -s --arg mark "$CHANNEL_MARK" '
     end' "$transcript" 2>/dev/null)"
 [ -n "$run" ] || exit 0
 
-# 額度快照：/usage 須以內建命令執行（num_turns==0）才採信；拿到的是各窗口剩餘百分比，不是 token 數
-quota=null
-if command -v claude >/dev/null 2>&1; then
-  q="$(timeout 20 claude -p --output-format json '/usage' 2>/dev/null)"
-  if jq -e '.is_error == false and .num_turns == 0' <<<"$q" >/dev/null 2>&1; then
-    quota="$(jq -c '[ .result | split("\n")[]
-      | capture("^(?<window>[^:]+):\\s+(?<used>[0-9]{1,3})% used(\\s+·\\s+resets\\s+(?<resets>.+))?$")?
-      | {window, remain_pct: (100 - (.used | tonumber)), resets} ]
-      | if length == 0 then null else . end' <<<"$q")"
-  fi
-fi
+# 額度快照：取自 quota.sh 的 claude 各窗口剩餘百分比（不是 token 數）；查不到記 null
+quota="$("$(dirname "$0")/quota.sh" --json claude 2>/dev/null | jq -c '.claude')"
+[ -n "$quota" ] || quota=null
 
 mkdir -p "$(dirname "$LOG")"
 jq -c -n --argjson run "$run" --argjson quota "$quota" --arg session "$session" --argjson complete "$complete" \

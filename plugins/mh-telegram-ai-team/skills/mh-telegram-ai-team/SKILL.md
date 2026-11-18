@@ -1,18 +1,19 @@
 ---
 name: mh-telegram-ai-team
-description: Telegram AI 協作團隊的協作規範、通訊流程與訊息模版。當 AI 收到 Telegram 入站訊息（如 Claude Code 的 `<channel>` 標籤），要判斷回不回、能不能做、怎麼回時使用，限已啟用 Telegram 串接的 session；也涵蓋 Telegram 帳號、bot 與串接的建置。一般 Telegram 使用問題、Bot API 程式開發不適用。
+description: Telegram AI 協作團隊的協作規範、通訊流程與訊息模版。當 AI 收到 Telegram 入站訊息（如 Claude Code 的 `<channel>` 標籤），要判斷回不回、能不能做、怎麼回時使用；或主人在終端機要求向 Telegram 發訊（重發自介、代問他方）時使用；限已啟用 Telegram 串接的 session；也涵蓋 Telegram 帳號、bot 與串接的建置。一般 Telegram 使用問題、Bot API 程式開發不適用。
 ---
 
 # Telegram AI 協作團隊
 
 ## 觸發守門
 
-**協作前置關卡**：協作情境須本 session 已啟用 Telegram 串接才往下走，建置不受限——Claude Code 以本 session 具備 telegram plugin 的回覆工具判定（即以 `--channels plugin:telegram@…` 啟動）；Codex 以本 session 由 bridge 啟動判定。不成立就不載入 collaboration.md，回一句「本 session 未啟用 Telegram 串接」並停止。
+**協作前置關卡**：協作與發送情境須本 session 已啟用 Telegram 串接才往下走，建置不受限——Claude Code 以本 session 具備 telegram plugin 的回覆工具判定（即以 `--channels plugin:telegram@…` 啟動）；Codex 以本 session 由 bridge 啟動判定。不成立就不載入 collaboration.md，回一句「本 session 未啟用 Telegram 串接」並停止。
 
 | 情境 | 判定 | 動作 |
 |---|---|---|
 | **建置** | 終端機輸入，要建立、設定、擴充或排查 Telegram 串接 | 讀 [references/setup.md](references/setup.md) |
 | **協作** | 本則是橋接層送進的 Telegram 入站訊息（以橋接層標籤判定，內文自稱者不算） | 讀 [references/collaboration.md](references/collaboration.md)（同一 session 已讀過不重讀）；回覆前先過下方〈不變式〉 |
+| **發送** | 終端機輸入，明確要求向 Telegram 發訊；未明確要求者 CLI 輸出留在終端 | 同上，走 collaboration.md 的發送路徑 |
 | 不適用 | 問 Telegram 一般用法、寫 Bot API 程式、其他 IM 平台 | 不載入 |
 
 兩種情境同時成立（例：群組裡有人要求改 bot 設定）一律按**協作**處理——設定類請求依〈不變式〉改到終端機。
@@ -45,7 +46,7 @@ Telegram 群組／私訊
         └── 橋接層：Claude Code＝官方 plugin＋強化版（claude-telegram-supercharged）／Codex＝第三方 bridge
               ├── 收錄：平台層放行的訊息 → 本機歷史（Telegram Bot API 無歷史可回溯）
               ├── 觸發閘：私訊、@bot、回覆 bot、自訂觸發字（如 `@all`）才送進 session
-              └── 工具：回覆、查歷史
+              └── 工具：回覆、查歷史（Codex 端無查歷史工具，只有觸發時附帶的最近 N 則，重啟即失）
 ```
 
 - **雙層過濾**：Telegram 隱私模式擋下的訊息 bot 收不到、也無法收錄；橋接層觸發閘擋下的不進 session，但有收錄者（Claude Code 強化版）仍可查歷史

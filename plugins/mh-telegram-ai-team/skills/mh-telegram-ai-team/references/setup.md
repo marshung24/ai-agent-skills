@@ -27,6 +27,7 @@
 | 6. 協作 skill | 使用者在終端機 | 每個接 Telegram 的 AI 都裝了本 skill；登錄檔已依 collaboration.md〈登錄檔〉建好 |
 | 7. 驗證 | 雙方 | 〈驗證〉各項通過 |
 
+- **先跑檢查**：Claude Code 端建置或排查開始時先跑 [scripts/check-setup.sh](../scripts/check-setup.sh)（`--offline` 不連外），從第一個 `FAIL`／`ASK` 的步驟接手，已 `PASS` 的不再詢問；無 token 時帳號偵測不到，以 `ASK` 標出
 - **人機分工**：帳號註冊、登入驗證碼、取得 token 由使用者本人做；其餘 Telegram 端操作一律依〈瀏覽器協作〉由 AI 代操作
 - **token 寫入**：使用者在終端機以隱藏輸入寫檔（依 SKILL.md〈不變式〉「不外洩」不經對話）；已出現在對話紀錄者請使用者 `/revoke` 換新
 
@@ -135,6 +136,7 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 
 依序確認，任一不過回〈排查〉：
 
+- [ ] `check-setup.sh` 無 `FAIL`（涵蓋強化版、token、`limits`、poller、環境變數；其餘項目須實際收發）
 - [ ] 強化版已套用：cache 最新版本目錄有 `server.ts.official` 備份，session 內有 `get_history` 工具
 - [ ] 私訊 bot 有入站、有回覆
 - [ ] 群組 @bot、回覆 bot、觸發字各觸發一次；不帶者不觸發

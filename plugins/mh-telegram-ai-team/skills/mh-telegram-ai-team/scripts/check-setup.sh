@@ -84,6 +84,14 @@ if jq -e --arg k "$PLUGIN_KEY" '.plugins | has($k)' "$HOME/.claude/plugins/insta
   ver="$(ls "$CACHE_DIR" 2>/dev/null | sort -V | tail -n 1)"
   if [ -n "$ver" ] && [ -f "$CACHE_DIR/$ver/server.ts.official" ]; then
     say PASS 4.橋接層 "強化版已套用（$ver）"
+    # 歷史保存上限：強化版寫死於 prune()，plugin 更新或重裝會蓋回原值，數值與目標不符時提示改法
+    tune="$(dirname "$0")/tune-history.sh"
+    tune_out="$("$tune" --check --file "$CACHE_DIR/$ver/server.ts" 2>&1)"
+    case $? in
+      0) say PASS 4.橋接層 "歷史保存上限符合目標（5000 則／140 天；超過 500MB 縮到 2000 則）" ;;
+      1) say WARN 4.橋接層 "歷史保存上限不符（$(grep -E '目前=' <<<"$tune_out" | awk '{print $1 $2}' | paste -sd ' ')）：跑 $tune --apply 後重開接 Telegram 的 session" ;;
+      *) say WARN 4.橋接層 "無法判讀歷史保存上限：$(tail -n 1 <<<"$tune_out")" ;;
+    esac
   else
     say FAIL 4.橋接層 "強化版未套用於最新版本 ${ver:-?}（plugin 更新後須重跑 install.sh）"
   fi
@@ -109,9 +117,9 @@ if [ -f "$acc" ]; then
   else
     say FAIL 5.授權 "未設 limits（防 AI 間迴圈）"
   fi
-  # admins 不受 limits 限制；是否只有主人須人工比對，故只報人數
+  # admins 不受 limits 限制；是否只有負責人須人工比對，故只報人數
   if jq -e '.admins | length > 0' "$acc" >/dev/null 2>&1; then
-    say INFO 5.授權 "admins $(jq '.admins | length' "$acc") 人：須只有主人"
+    say INFO 5.授權 "admins $(jq '.admins | length' "$acc") 人：須只有負責人"
   else
     say WARN 5.授權 "未設 admins"
   fi
@@ -120,13 +128,41 @@ else
 fi
 
 # 步驟 7 執行期：poller 唯一、一般 shell 無 token 變數、無 MCP 失敗快取
-# 以本機 bun server.ts 行程數近似 poller 數；分不出 token 與 MCP-only，多個時只警示，其他主機／容器查不到
-n="$(pgrep -f 'bun.*server\.ts' 2>/dev/null | wc -l | tr -d ' ')"
-case "$n" in
-  0) say INFO 7.驗證 "目前無 server 執行（接 Telegram 的 session 未啟動）" ;;
-  1) say PASS 7.驗證 "本機只有 1 個 server（其他主機／容器需另查）" ;;
-  *) say WARN 7.驗證 "$n 個 server 同時執行；同 token 且皆非 MCP-only 會 409 Conflict，需人工確認" ;;
+# 只允許單一接收 session（帶 --channels plugin:telegram 的 claude）底下的 server；其餘皆為殘留，一律清除
+# 以行程名 claude 篩選再比對參數，避免 pgrep -f 誤中含相同字串的 shell
+hosts=()
+for p in $(pgrep -x claude 2>/dev/null); do
+  ps -o args= -p "$p" 2>/dev/null | grep -q -- '--channels plugin:telegram' && hosts+=("$p")
+done
+# 只算 telegram plugin 的 server：以工作目錄在 plugin cache 下判定，避免誤殺其他專案的 bun server.ts
+srv_cwd() { readlink "/proc/$1/cwd" 2>/dev/null || lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'; }
+servers=()
+for p in $(pgrep -f 'bun.*server\.ts' 2>/dev/null); do
+  case "$(srv_cwd "$p")" in "$CACHE_DIR"/*) servers+=("$p") ;; esac
+done
+lock_pid="$(cat "$CH_DIR/data/telegram.lock" 2>/dev/null)"
+# 沿父行程往上找，祖先含任一接收 session 即屬於它
+owned() {
+  local p="$1"
+  while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+    [[ " ${hosts[*]:-} " == *" $p "* ]] && return 0
+    p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+  done
+  return 1
+}
+kept=(); strays=()
+for s in "${servers[@]}"; do if owned "$s"; then kept+=("$s"); else strays+=("$s"); fi; done
+case ${#hosts[@]} in
+  0) say INFO 7.驗證 "無接收 session 執行（未帶 --channels 啟動）" ;;
+  1) say PASS 7.驗證 "接收 session ${hosts[0]}，其下 server ${#kept[@]} 個" ;;
+  *) say FAIL 7.驗證 "${#hosts[@]} 個 session 帶 --channels（${hosts[*]}），只能留一個" ;;
 esac
+if [ ${#strays[@]} -gt 0 ]; then
+  hint=""; [[ " ${strays[*]} " == *" $lock_pid "* ]] && hint="；其中 $lock_pid 持有 telegram.lock，清除後於接收 session 執行 /mcp 重連"
+  say FAIL 7.驗證 "殘留 server ${#strays[@]} 個（不屬接收 session）：kill ${strays[*]}$hint"
+else
+  say PASS 7.驗證 "無殘留 server"
+fi
 # token 應只在 .env；export 到 shell 會被所有子行程繼承
 if env | grep -q '^TELEGRAM_'; then say FAIL 7.驗證 "目前 shell 有 TELEGRAM_ 環境變數"; else say PASS 7.驗證 "shell 無 TELEGRAM_ 環境變數"; fi
 # 曾連線失敗的 MCP server 會被快取，15 分鐘內同名 server 略過不啟動

@@ -26,6 +26,7 @@ esac
 # 路徑皆為官方 telegram plugin 的固定位置；強化版沿用同一份設定與 cache 目錄
 CH_DIR="$HOME/.claude/channels/telegram"
 PLUGIN_KEY="telegram@claude-plugins-official"
+SEC_DIR="${MH_TG_SECRETARY_DIR:-$HOME/secretary}"
 CACHE_DIR="$HOME/.claude/plugins/cache/claude-plugins-official/telegram"
 fail=0   # 1＝已有 FAIL，決定結束碼
 out=""   # 暫存的結果行，finish 時才排序輸出
@@ -33,6 +34,26 @@ out=""   # 暫存的結果行，finish 時才排序輸出
 # 檢查順序依資料相依（jq、token 先行），與步驟順序不同；故結果先暫存，結束時依步驟編號穩定排序
 # say <狀態> <步驟> <訊息>：記一行結果，FAIL 時標記結束碼
 say() { out+="$(printf '%-4s %s %s' "$1" "$2" "$3")"$'\n'; [ "$1" = FAIL ] && fail=1; return 0; }
+# reg_missing <internal.md>：列出未填的必要欄位（祕書暱稱／bot username／bot ID、負責人 user ID／username）
+# 解析模版的表格形狀：〈祕書〉為「欄位｜值」、〈負責人〉為「user ID｜username｜暱稱」；值為空或仍是 <…> 佔位即未填
+reg_missing() {
+  awk -F'|' '
+    /^## / { sec = $0; next }
+    sec ~ /^## 祕書/ && NF >= 3 {
+      k = $2; v = $3; gsub(/^ +| +$/, "", k); gsub(/^ +| +$/, "", v)
+      if (k == "暱稱" || k == "bot username" || k == "bot ID") { seen[k] = 1; if (v == "" || v ~ /^<.*>$/) miss[k] = 1 }
+    }
+    sec ~ /^## 負責人/ && $2 ~ /^ *[0-9]+ *$/ { owner = 1; u = $3; gsub(/ /, "", u); if (u ~ /^@[A-Za-z0-9_]+$/) owner_u = 1 }
+    END {
+      out = ""
+      if (!seen["暱稱"] || miss["暱稱"]) out = out "祕書暱稱 "
+      if (!seen["bot username"] || miss["bot username"]) out = out "bot username "
+      if (!seen["bot ID"] || miss["bot ID"]) out = out "bot ID "
+      if (!owner) out = out "負責人 user ID "
+      else if (!owner_u) out = out "負責人 username "
+      sub(/ $/, "", out); print out
+    }' "$1"
+}
 # finish：依步驟編號（第 2 欄數字）穩定排序輸出並結束；同步驟內維持檢查順序
 finish() { printf '%s' "$out" | sort -s -k2,2n; exit "$fail"; }
 
@@ -143,6 +164,44 @@ else
   say FAIL 5.授權 "$acc 不存在（尚未配對）"
 fi
 
+# 步驟 6 祕書目錄：存在、非 git repo、只在此啟用 plugin、AGENTS.md 宣告資料目錄、登錄檔已建
+if [ -d "$SEC_DIR" ]; then
+  if git -C "$SEC_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    say FAIL 6.協作skill "祕書目錄 $SEC_DIR 在 git repo 內，資料含 ID 與個資，須改用非 repo 目錄"
+  else
+    say PASS 6.協作skill "祕書目錄 $SEC_DIR"
+  fi
+  if jq -e --arg k "$PLUGIN_KEY" '.enabledPlugins[$k] == true' "$SEC_DIR/.claude/settings.json" >/dev/null 2>&1; then
+    say PASS 6.協作skill "祕書目錄 .claude/settings.json 已啟用 telegram plugin"
+  else
+    say FAIL 6.協作skill "祕書目錄 .claude/settings.json 未啟用 telegram plugin（見 setup.md〈祕書目錄〉）"
+  fi
+  if grep -qF '`data/`' "$SEC_DIR/AGENTS.md" 2>/dev/null; then
+    say PASS 6.協作skill "AGENTS.md 已宣告資料目錄"
+  else
+    say FAIL 6.協作skill "AGENTS.md 未宣告資料目錄（載入規則見 collaboration.md〈登錄檔〉）"
+  fi
+  reg="$SEC_DIR/data/internal.md"
+  if [ -f "$reg" ]; then
+    say PASS 6.協作skill "internal.md 已建"
+    # 內容：自介與同意的必要欄位已填、無模版佔位；只報欄位名與數量，不輸出值
+    miss="$(reg_missing "$reg")"
+    if [ -n "$miss" ]; then say FAIL 6.協作skill "internal.md 未填：$miss（自介會被擋；依 collaboration.md〈自介來源〉）"; else say PASS 6.協作skill "internal.md 祕書、負責人欄位已填"; fi
+    # 引言行（> 開頭）是模版說明，不計
+    n="$(cat "$reg" "$SEC_DIR"/data/internal/*.md 2>/dev/null | grep -v '^>' | grep -c '<[^<>]\+>')"
+    [ "$n" -gt 0 ] && say FAIL 6.協作skill "internal 登錄殘留 $n 行模版佔位 <…>"
+    n="$(cat "$reg" "$SEC_DIR"/data/internal/*.md 2>/dev/null | grep -v '^>' | grep -c '待確認')"
+    [ "$n" -gt 0 ] && say WARN 6.協作skill "internal 登錄有 $n 行「待確認」，須負責人定版"
+  else
+    say FAIL 6.協作skill "缺 data/internal.md（建檔見 internal-setup.md）"
+  fi
+  # 權限：登錄檔含 ID 與個資，主檔與子檔皆應 600
+  bad="$(find "$SEC_DIR/data" -maxdepth 2 -type f -name '*.md' \( -path "$SEC_DIR/data/internal*" -o -path "$SEC_DIR/data/external*" \) ! -perm 600 2>/dev/null | sed "s|^$SEC_DIR/data/||" | tr '\n' ' ' | sed 's/ $//')"
+  if [ -n "$bad" ]; then say WARN 6.協作skill "登錄檔權限非 600：$bad"; else say PASS 6.協作skill "登錄檔權限皆 600"; fi
+else
+  say FAIL 6.協作skill "祕書目錄 $SEC_DIR 不存在（MH_TG_SECRETARY_DIR 可改；見 setup.md〈祕書目錄〉）"
+fi
+
 # 步驟 7 執行期：poller 唯一、一般 shell 無 token 變數、無 MCP 失敗快取
 # 只允許單一接收 session（帶 --channels plugin:telegram 的 claude）底下的 server；其餘皆為殘留，一律清除
 # 以行程名 claude 篩選再比對參數，避免 pgrep -f 誤中含相同字串的 shell
@@ -170,7 +229,8 @@ kept=(); strays=()
 for s in "${servers[@]}"; do if owned "$s"; then kept+=("$s"); else strays+=("$s"); fi; done
 case ${#hosts[@]} in
   0) say INFO 7.驗證 "無接收 session 執行（未帶 --channels 啟動）" ;;
-  1) say PASS 7.驗證 "接收 session ${hosts[0]}，其下 server ${#kept[@]} 個" ;;
+  1) say PASS 7.驗證 "接收 session ${hosts[0]}，其下 server ${#kept[@]} 個"
+     [ "$(srv_cwd "${hosts[0]}")" = "$SEC_DIR" ] || say FAIL 7.驗證 "接收 session 不在祕書目錄啟動（目前：$(srv_cwd "${hosts[0]}")）" ;;
   *) say FAIL 7.驗證 "${#hosts[@]} 個 session 帶 --channels（${hosts[*]}），只能留一個" ;;
 esac
 if [ ${#strays[@]} -gt 0 ]; then

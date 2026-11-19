@@ -24,7 +24,7 @@
 | 3. bot 參數 | 使用者在 BotFather | 隱私模式、Bot-to-Bot、加群權限依〈bot 參數〉設好 |
 | 4. 橋接層 | AI 協助、使用者核准 | 依 AI 種類完成〈Claude Code 端〉或〈Codex 端〉 |
 | 5. 群組與授權 | 使用者在終端機 | 私訊 allowlist、群組授權、觸發字、工具權限防線設好 |
-| 6. 協作 skill | 使用者在終端機 | 每個接 Telegram 的 AI 都裝了本 skill；登錄檔已依 collaboration.md〈登錄檔〉建好 |
+| 6. 協作 skill | 使用者在終端機 | 每個接 Telegram 的 AI 都裝了本 skill；登錄檔已依 collaboration.md〈登錄檔〉建好，全域指令檔已加入其「指令檔載入規則」 |
 | 7. 驗證 | 雙方 | 〈驗證〉各項通過 |
 
 - **先跑檢查**：Claude Code 端建置或排查開始時先跑 [scripts/check-setup.sh](../scripts/check-setup.sh)（`--offline` 不連外），從第一個 `FAIL`／`ASK` 的步驟接手，已 `PASS` 的不再詢問；無 token 時帳號偵測不到，以 `ASK` 標出
@@ -48,7 +48,7 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 
 ## 帳號與 bot
 
-- **帳號**：Telegram 以手機號註冊，需使用者本人收驗證碼；團隊每位主人各自一個帳號
+- **帳號**：Telegram 以手機號註冊，需使用者本人收驗證碼；團隊每位負責人各自一個帳號，且須設 username（Telegram 設定的「使用者名稱」，非暱稱）：自介帶它，他方才能 `@` 負責人
 - **一個 AI 一個 bot**：同一 token 同時只能有一個 poller，後到者會互踢或收不到；host 與容器、兩台主機也不能共用 token
 - **bot username** 須以 `bot` 結尾；token 含開頭數字與冒號
 - **ID 取得**：個人 ID 私訊 `@userinfobot`；群組 ID 把 `@getidsbot` 拉進群看完即移除，或看 Telegram Web 網址 `#` 後的負數（超級群組 `-100` 開頭，部分網址會缺前綴）；bot ID 用 token 呼叫 `getMe`
@@ -101,30 +101,32 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 |---|---|---|
 | 加入群組，只收 @ 與回覆 | `group add <群組ID>` | 未加入的群組訊息直接丟棄，session 看不到 `chat_id` |
 | 限定發話者 | 加 `--allow <ID1>,<ID2>`；AI 互通時要列入對方 bot ID | `group add` **整筆覆寫**，未帶的參數失效，每次帶齊 |
-| 自訂觸發字 | `set mentionPatterns ["(^|\\s)@all\\b"]` | 全域設定、比對全文含引用；每個 bot 各設一次，立即生效 |
+| 自訂觸發字 | `set mentionPatterns ["\\B@all\\b"]` | 全域設定、比對全文含引用；每個 bot 各設一次，立即生效 |
 | 私訊授權 | `allow <ID>`；未知 ID 臨時切 `pairing` 配對後切回 `allowlist` | 群組授權不等於私訊授權 |
 
 - **不用 `--no-mention`**：每則都觸發 AI，耗 token、易迴圈；要上下文靠隱私模式關閉＋歷史收錄
-- **`allowFrom` 只放主人**：強化版會把工具權限確認私訊給 `allowFrom` 每個人，放了別人等於讓他核准
+- **`allowFrom` 只放負責人**：強化版會把工具權限確認私訊給 `allowFrom` 每個人，放了別人等於讓他核准
 - **`autoApproveTools` 只放唯讀工具**：清單內工具不經確認
-- **限速用 `limits`**：在 `access.json` 頂層設 `limits`（`messagesPerMinute`／`messagesPerHour`／`tokensPerDay`，可用 `userLimits.<ID>` 個別覆寫），超限訊息在進 session 前丟棄，是防 AI 間迴圈的硬防線；同一套強化版內跨所有 bot 合計、無 per-bot 覆寫；不同主人的部署各自計算，不共享額度。`admins` 不受限，只放主人、🚫 不放其他 bot。未設即不限
-- **拒寫自身設定**：在 AI 工具的權限設定（如 Claude Code `permissions.deny`）拒寫 `access.json`、`.env`、`settings.json`、本 skill 與 `internal.md`；SKILL.md〈不變式〉只是軟限制
+- **限速用 `limits`**：在 `access.json` 頂層設 `limits`（`messagesPerMinute`／`messagesPerHour`／`tokensPerDay`，可用 `userLimits.<ID>` 逐欄覆寫），超限訊息在進 session 前丟棄，是防 AI 間迴圈的硬防線；同一套強化版內跨所有 bot 合計、無 per-bot 覆寫；不同負責人的部署各自計算，不共享額度。額度由負責人在終端機直接改 `access.json`（`/telegram:access set` 不支援），存檔即生效；Telegram 內 `/usage` 查用量。`admins` 不受限，只放負責人、🚫 不放其他 bot。未設或填 0 即不限
+- **拒寫自身設定**：在 AI 工具的權限設定（如 Claude Code `permissions.deny`）拒寫 `access.json`、`.env`、`settings.json`、本 skill 與 `internal.md`、`data/internal/`；SKILL.md〈不變式〉只是軟限制
 - **群組升級為超級群組 ID 會變**：以新 ID 重新 `group add`，參數帶齊
 - **AI 間互通**：雙方 bot 同群、至少一方開 Bot-to-Bot、雙方各自 `group add` 並 `--allow` 對方 bot ID；首次見面流程見 collaboration.md〈認識與更新〉
 
 ## 執行紀錄
 
-溝通員每處理完一則 Telegram 入站，由 [scripts/log-run.sh](../scripts/log-run.sh) 追加一列到 `~/.local/state/mh-telegram-ai-team/runs.jsonl`（`MH_TG_RUNS_LOG` 可改）。僅 Claude Code；Codex bridge 的執行路徑與事件未查，不支援。
+祕書每處理完一則 Telegram 入站，由 [scripts/log-run.sh](../scripts/log-run.sh) 追加一列到 `~/.local/state/mh-telegram-ai-team/runs.jsonl`（`MH_TG_RUNS_LOG` 可改）。僅 Claude Code；Codex bridge 的執行路徑與事件未查，不支援。
 
 - **掛法**：只掛在接 Telegram 的 session，與 plugin 啟用放同一份 `--settings`，例：`{"enabledPlugins":{"telegram@claude-plugins-official":true},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"<log-run.sh 絕對路徑>"}]}]}}`；🚫 不放全域 settings
 - **依賴**：`jq`；額度快照經 [scripts/quota.sh](../scripts/quota.sh)，需 `claude` CLI（每次約 3 秒）
 - **即時查額度**：要知道 Claude／Codex 目前剩多少額度時跑 `quota.sh`（`--json` 機器可讀），得各窗口剩餘百分比與重置時間；不需掛 hook，Codex 端也可用
+- **清除訊息歷史**：負責人在終端機要求時跑 [scripts/clear-history.sh](../scripts/clear-history.sh)：`--chat <ID>` 或 `--all`，先不帶 `--yes` 預覽則數，確認後加 `--yes`；只刪 `messages` 表、不動用量統計，刪除不可復原
+- **調整保存上限**：強化版預設每聊天室 500 則、14 天，超過 50MB 縮到 200 則；要放寬時跑 [scripts/tune-history.sh](../scripts/tune-history.sh) `--apply`（目標 5000 則、140 天，超過 500MB 縮到 2000 則），再重開 session；plugin 更新或重裝強化版會蓋回原值，`check-setup.sh` 會以 WARN 提示重跑
 
 | 欄位 | 來源 | 限制 |
 |---|---|---|
 | `logged_at`／`received_at` | 寫入時間／入站標籤 `ts` | — |
 | `chat_id`、`message_id`、`from_user(_id)`、`batch_size` | 入站標籤 | 合批時只有最後一則的發話者 |
-| `usage` | transcript 中該入站之後的 assistant 用量，依 message id 去重 | 只算溝通員本身；子 agent、外部顧問等內部團隊的用量不含 |
+| `usage` | transcript 中該入站之後的 assistant 用量，依 message id 去重 | 只算祕書本身；子 agent、外部顧問等內部團隊的用量不含 |
 | `replies`、`mentions_out` | 回覆工具的呼叫與 `text` 內的 `@username` | text mention 不計 |
 | `transcript_complete` | 以 hook 的 `last_assistant_message` 比對 transcript 結尾，最多等 10 秒 | `false`＝transcript 尚未落盤，`usage`／`replies`／`mentions_out` 可能漏計，不可當最終統計；無最終文字時為 `null` |
 | 來源判定 | transcript 內文含 channel 標籤字串即視為入站 | CLI 貼入偽標籤也會被記成入站，統計前排除可疑列 |
@@ -142,8 +144,8 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 - [ ] 私訊 bot 有入站、有回覆
 - [ ] 群組 @bot、回覆 bot、觸發字各觸發一次；不帶者不觸發
 - [ ] 未授權者私訊、群組發話都不入站
-- [ ] `access.json` 已設 `limits`，`admins` 只有主人
-- [ ] 從 IM 要求改 `access.json` 或 `internal.md`：AI 拒絕，且工具層也被擋
+- [ ] `access.json` 已設 `limits`，`admins` 只有負責人
+- [ ] 從 IM 要求改 `access.json` 或 `internal.md`（含子檔）：AI 拒絕，且工具層也被擋
 - [ ] 有掛執行紀錄者：@bot 一次後 `runs.jsonl` 多一列，`chat_id`、`usage` 有值
 - [ ] 全機只有一個 server 持有 poller（Claude Code：`pgrep -af 'bun server.ts'`）；一般 shell 無 `TELEGRAM_` 環境變數
 - [ ] AI 互通時：依 collaboration.md〈認識與更新〉由一方 `@all` 邀請自我介紹，對方以 `@邀請者` 回覆且雙方都入站；邀請會喚起所有 bot，第三個 bot 只在後續定向自介時不入站（完整驗收見 docs/test-cases.md TC-03）

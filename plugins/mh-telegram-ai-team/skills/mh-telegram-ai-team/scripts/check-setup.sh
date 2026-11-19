@@ -105,24 +105,40 @@ else
   say PASS 4.橋接層 "未全域啟用"
 fi
 
-# 步驟 5 群組與授權：access.json 的私訊政策、限速、admins；只輸出人數，不輸出 ID
+# 步驟 5 群組與授權：access.json 的私訊政策、限速、admins、觸發字；只輸出人數，不輸出 ID
 acc="$CH_DIR/access.json"
 if [ -f "$acc" ]; then
   # 未設 dmPolicy 時 server 預設為 pairing
   pol="$(jq -r '.dmPolicy // "pairing"' "$acc")"
   if [ "$pol" = allowlist ]; then say PASS 5.授權 "dmPolicy=allowlist"; else say FAIL 5.授權 "dmPolicy=$pol，配對完應切 allowlist"; fi
   say INFO 5.授權 "$(jq -r '"allowFrom \(.allowFrom // [] | length) 人、群組 \(.groups // {} | length) 個"' "$acc")"
-  if jq -e '.limits | type == "object"' "$acc" >/dev/null; then
+  # 判準同 server：三欄取整後大於 0 才算限速；數值高低由負責人自訂，不檢查
+  lim_keys='["messagesPerMinute","messagesPerHour","tokensPerDay"]'
+  if ! jq -e '.limits | type == "object"' "$acc" >/dev/null; then
+    say FAIL 5.授權 "未設 limits（防 AI 間迴圈）"
+  elif jq -e --argjson k "$lim_keys" '[.limits[$k[]] | (tonumber? // 0) | floor | select(. > 0)] | length > 0' "$acc" >/dev/null; then
     say PASS 5.授權 "已設 limits（$(jq -r '.limits | to_entries | map("\(.key)=\(.value)") | join(" ")' "$acc")）"
   else
-    say FAIL 5.授權 "未設 limits（防 AI 間迴圈）"
+    say FAIL 5.授權 "limits 值無效，等同不限（至少一欄須大於 0）"
   fi
+  # userLimits 明設 0 或負數會覆寫成不限，可能是刻意，交人判斷
+  ul="$(jq -r --argjson k "$lim_keys" '[.userLimits // {} | to_entries[] | select(.value | type == "object") | select([.value | to_entries[] | select(.key | IN($k[])) | .value | (tonumber? // 0) | floor | select(. <= 0)] | length > 0) | .key] | join(",")' "$acc")"
+  [ -z "$ul" ] || say WARN 5.授權 "userLimits 有不限額度的 ID：$ul（須確認不是其他 bot）"
   # admins 不受 limits 限制；是否只有負責人須人工比對，故只報人數
   if jq -e '.admins | length > 0' "$acc" >/dev/null 2>&1; then
     say INFO 5.授權 "admins $(jq '.admins | length' "$acc") 人：須只有負責人"
   else
     say WARN 5.授權 "未設 admins"
   fi
+  # 觸發字 @all 為群組廣播契約（collaboration.md〈訊息契約〉）；以樣式實際比對 "@all"，不比字面
+  if jq -e '.mentionPatterns // [] | any(. as $p | "@all" | test($p))' "$acc" >/dev/null 2>&1; then
+    say PASS 5.授權 "mentionPatterns 可觸發 @all"
+  else
+    say FAIL 5.授權 "mentionPatterns 無 @all 觸發字（設法見 setup.md〈群組與授權〉）"
+  fi
+  # requireMention 未設時 server 預設為 true；設 false 的群組每則訊息都進 session
+  n="$(jq '[.groups // {} | .[] | select(.requireMention == false)] | length' "$acc")"
+  if [ "$n" -gt 0 ]; then say FAIL 5.授權 "$n 個群組 requireMention=false，未 @ 的訊息也會觸發"; else say PASS 5.授權 "群組皆需 @ 才觸發"; fi
 else
   say FAIL 5.授權 "$acc 不存在（尚未配對）"
 fi

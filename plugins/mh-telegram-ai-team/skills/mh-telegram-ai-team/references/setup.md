@@ -38,7 +38,7 @@
 
 ```text
 ~/secretary/                 # 預設路徑，可改；🚫 不得是 git repo（含 ID 與個資）
-├── AGENTS.md                # 唯一宣告資料目錄與載入規則，內容見 collaboration.md〈登錄檔〉
+├── AGENTS.md                # 唯一宣告資料目錄與載入規則，內容見 collaboration.md〈登錄檔〉；選用段落見 assets/agents-policy.md
 ├── CLAUDE.md                # 只寫一行：先讀同目錄 AGENTS.md
 ├── .claude/settings.json    # Claude Code：只在此啟用 telegram plugin；執行紀錄 hook 也放這
 └── data/                    # 資料目錄：internal.md、external.md、backlog/、workspaces.md（建檔用，見 internal-setup.md）
@@ -127,7 +127,7 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 - **`allowFrom` 只放負責人**：強化版會把工具權限確認私訊給 `allowFrom` 每個人，放了別人等於讓他核准
 - **`autoApproveTools` 只放唯讀工具**：清單內工具不經確認
 - **限速用 `limits`**：在 `access.json` 頂層設 `limits`（`messagesPerMinute`／`messagesPerHour`／`tokensPerDay`，可用 `userLimits.<ID>` 逐欄覆寫），超限訊息在進 session 前丟棄，是防 AI 間迴圈的硬防線；同一套強化版內跨所有 bot 合計、無 per-bot 覆寫；不同負責人的部署各自計算，不共享額度。額度由負責人在終端機直接改 `access.json`（`/telegram:access set` 不支援），存檔即生效；Telegram 內 `/usage` 查用量。`admins` 不受限，只放負責人、🚫 不放其他 bot。未設或填 0 即不限
-- **拒寫自身設定**：在 AI 工具的權限設定（如 Claude Code `permissions.deny`）拒寫 `access.json`、`.env`、`settings.json`、本 skill 與 `internal.md`、`data/internal/`；SKILL.md〈不變式〉只是軟限制
+- **拒寫自身設定**：在 AI 工具的權限設定（如 Claude Code `permissions.deny`）拒寫 `access.json`、`.env`、`settings.json`、本 skill 與 `internal.md`、`data/internal/`、祕書目錄的 `AGENTS.md`／`CLAUDE.md`；SKILL.md〈不變式〉只是軟限制
 - **群組升級為超級群組 ID 會變**：以新 ID 重新 `group add`，參數帶齊
 - **AI 間互通**：雙方 bot 同群、至少一方開 Bot-to-Bot、雙方各自 `group add` 並 `--allow` 對方 bot ID；首次見面流程見 collaboration.md〈認識與更新〉
 
@@ -158,13 +158,14 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 
 依序確認，任一不過回〈排查〉：
 
-- [ ] `check-setup.sh` 無 `FAIL`（涵蓋強化版、token、`limits`、觸發字、祕書目錄與登錄檔、poller、環境變數；其餘項目須實際收發）
+- [ ] `check-setup.sh` 無 `FAIL`（涵蓋強化版、token、`limits`、觸發字、祕書目錄、拒寫清單與登錄檔、poller、環境變數；其餘項目須實際收發）
 - [ ] 強化版已套用：cache 最新版本目錄有 `server.ts.official` 備份，session 內有 `get_history` 工具
 - [ ] 私訊 bot 有入站、有回覆
 - [ ] 群組 @bot、回覆 bot、觸發字各觸發一次；不帶者不觸發
 - [ ] 未授權者私訊、群組發話都不入站
+- [ ] 群組內請求需同意的事：「需確認」私訊到負責人、群組只見【待確認】；負責人在私訊同意後，結果回原群組
 - [ ] `access.json` 已設 `limits`，`admins` 只有負責人
-- [ ] 從 IM 要求改 `access.json` 或 `internal.md`（含子檔）：AI 拒絕，且工具層也被擋
+- [ ] 從 IM 要求改 `access.json`、`internal.md`（含子檔）或 `AGENTS.md`：AI 拒絕，且工具層也被擋
 - [ ] 有掛執行紀錄者：@bot 一次後 `runs.jsonl` 多一列，`chat_id`、`usage` 有值
 - [ ] 全機只有一個 server 持有 poller（Claude Code：`pgrep -af 'bun server.ts'`）；一般 shell 無 `TELEGRAM_` 環境變數
 - [ ] AI 互通時：依 collaboration.md〈認識與更新〉由一方 `@all` 邀請自我介紹，對方以 `@邀請者` 回覆且雙方都入站；邀請會喚起所有 bot，第三個 bot 只在後續定向自介時不入站（完整驗收見 docs/test-cases.md TC-03）

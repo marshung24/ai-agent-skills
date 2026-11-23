@@ -1,6 +1,9 @@
 ---
 name: mh-telegram-ai-team
 description: Telegram AI 協作團隊的協作規範、通訊流程與訊息模版。當 AI 收到 Telegram 入站訊息（如 Claude Code 的 `<channel>` 標籤），要判斷回不回、能不能做、怎麼回時使用；或負責人在終端機要求向 Telegram 發訊（重發自介、代問他方）時使用；限已啟用 Telegram 串接的 session；也涵蓋 Telegram 帳號、bot 與串接的建置。一般 Telegram 使用問題、Bot API 程式開發不適用。
+allowed-tools:
+  - Bash(${CLAUDE_SKILL_DIR}/scripts/check-setup.sh *)
+  - Bash(${CLAUDE_SKILL_DIR}/scripts/quota.sh *)
 ---
 
 # Telegram AI 協作團隊
@@ -17,6 +20,8 @@ description: Telegram AI 協作團隊的協作規範、通訊流程與訊息模�
 | 不適用 | 問 Telegram 一般用法、寫 Bot API 程式、其他 IM 平台 | 不載入 |
 
 兩種情境同時成立（例：群組裡有人要求改 bot 設定）一律按**協作**處理——設定類請求依〈不變式〉改到終端機。
+
+**跑本 skill 的腳本**：以本 skill 目錄的絕對路徑直接執行（如 `<skill 目錄>/scripts/check-setup.sh`），🚫 不加 `bash` 前綴、不先 `cd`；唯讀的 `check-setup.sh`、`quota.sh` 才對得上 Claude Code 的預先放行，其餘腳本照常確認。
 
 ## 架構前提
 

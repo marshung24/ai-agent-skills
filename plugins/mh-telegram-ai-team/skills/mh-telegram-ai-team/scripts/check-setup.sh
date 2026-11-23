@@ -164,7 +164,7 @@ else
   say FAIL 5.授權 "$acc 不存在（尚未配對）"
 fi
 
-# 步驟 6 祕書目錄：存在、非 git repo、只在此啟用 plugin、AGENTS.md 宣告資料目錄、登錄檔已建
+# 步驟 6 祕書目錄：存在、非 git repo、只在此啟用 plugin、AGENTS.md 宣告資料目錄、拒寫清單、登錄檔已建
 if [ -d "$SEC_DIR" ]; then
   if git -C "$SEC_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     say FAIL 6.協作skill "祕書目錄 $SEC_DIR 在 git repo 內，資料含 ID 與個資，須改用非 repo 目錄"
@@ -181,6 +181,11 @@ if [ -d "$SEC_DIR" ]; then
   else
     say FAIL 6.協作skill "AGENTS.md 未宣告資料目錄（載入規則見 collaboration.md〈登錄檔〉）"
   fi
+  # 工具層防線：拒寫清單須涵蓋指令檔與受保護設定（setup.md〈群組與授權〉「拒寫自身設定」）；只認 Edit／Write 類規則含檔名，Bash 寫入無法靜態判定
+  deny="$(cat "$SEC_DIR/.claude/settings.json" "$SEC_DIR/.claude/settings.local.json" "$HOME/.claude/settings.json" 2>/dev/null | jq -rs '[.[].permissions.deny // [] | .[] | select(test("^(Edit|Write|MultiEdit|NotebookEdit)\\("))] | join("\n")' 2>/dev/null)"
+  miss=""
+  for f in AGENTS.md CLAUDE.md internal.md access.json; do printf '%s' "$deny" | grep -qF "$f" || miss="$miss $f"; done
+  if [ -n "$miss" ]; then say FAIL 6.協作skill "permissions.deny 的 Edit／Write 未涵蓋：${miss# }（IM 回合可能改寫；見 setup.md〈群組與授權〉）"; else say PASS 6.協作skill "permissions.deny 的 Edit／Write 涵蓋指令檔與受保護設定（Bash 寫入須另行實測）"; fi
   reg="$SEC_DIR/data/internal.md"
   if [ -f "$reg" ]; then
     say PASS 6.協作skill "internal.md 已建"

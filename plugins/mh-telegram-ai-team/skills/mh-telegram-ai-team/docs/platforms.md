@@ -44,7 +44,7 @@
 | bot 發訊速率 | 每群組 20 則／分、每聊天室約 1 則／秒、全域約 30 則／秒 | 群組 20 則／分是硬上限、買不到（付費廣播需 10 萬 MAU 與 10 萬 Stars）；多人同時提問或長回覆分段時會 429 |
 | 讀全部群組訊息 | 關隱私模式或把 bot 設為管理員，改後要重新進群 | 平台層擋下的訊息 bot 收不到，橋接層也無從收錄 |
 | 歷史 | Bot API 無歷史；未取走的 update 只保留 24 小時 | 歷史只能靠常駐收錄；bot 停機超過 24 小時或加入前的訊息永久缺失 |
-| 成員查詢 | 無完整成員名單；只能查管理員、總人數與已知 ID 的單一成員（`getChatAdministrators`、`getChatMemberCount`、`getChatMember`） | plugin 未提供這些工具（未實跑）；bot 身分只能由主人交換 |
+| 成員查詢 | 無完整成員名單；只能查管理員、總人數與已知 ID 的單一成員（`getChatAdministrators`、`getChatMemberCount`、`getChatMember`） | plugin 未提供這些工具（未實跑）；bot 身分只能由負責人交換 |
 | `@all` | Telegram 無原生全體提及 | 以橋接層 `mentionPatterns` 文字比對實作，每個 bot 各自觸發、各自回答，不是協同 |
 | 檔案 | 上傳 50MB、下載 20MB；自架 Local Bot API Server 可放寬 | 大檔案實際上限約 20MB |
 | bot 互通 | Bot API 10.0 起支援 Bot-to-Bot Communication Mode，需在 BotFather 開啟；官方要求自行防迴圈 | 開啟位置見 setup.md〈bot 參數〉 |
@@ -136,9 +136,11 @@
 | 項目 | 行為 |
 |---|---|
 | 儲存 | `~/.claude/channels/telegram/data/messages.db`（SQLite），重啟保留 |
-| 工具 | `get_history` 依時間往回翻（預設 50、上限 200 則，`before` 帶 unix 時間分頁）；`search_messages` 子字串比對（預設 20、上限 100 則），非 FTS，中文不需分詞；`clear_history` 清單一聊天室 |
+| 工具 | `get_history` 依時間往回翻（預設 50、上限 200 則，`before` 帶 unix 時間分頁）；`search_messages` 子字串比對（預設 20、上限 100 則），非 FTS，中文不需分詞；`clear_history` 清單一聊天室，加 `restart_context` 另重啟 session；只刪本機紀錄，`clear-history.sh` 為終端機版 |
+| 自動附帶 | 每則入站通知附 `[Recent history — last N messages]`：該聊天室最近 5 則、依時間排序，每則截 300 字，bot 自己的發言標 `[BOT]` |
+| 跨 `/clear` 記憶 | `save_memory` 把摘要追加到 `data/memory.md`，啟動時載入 MCP 指示；超過 1 萬字時較舊的一半壓縮；`clear_history` 與 `clear-history.sh` 都不清此檔 |
 | 收錄範圍 | 所有入站訊息在 gate 檢查前寫入，含群組內沒 @ 的訊息；bot 自己的 `reply` 送出後也寫入；語音預設先轉寫再存（`autoTranscribe`，需轉寫服務，可能額外耗 API 費用或本機 CPU） |
-| 保存期限 | 清理策略、非即時上限：每寫入 100 筆清一次，刪 14 天前與每聊天室 500 則以外者；資料庫超過 50MB 時每聊天室縮到 200 則，不保證降回 50MB；寫死於程式 |
+| 保存期限 | 清理策略、非即時上限：每寫入 100 筆清一次，刪 14 天前與每聊天室 500 則以外者；資料庫超過 50MB 時每聊天室縮到 200 則，不保證降回 50MB；寫死於程式，改用 `scripts/tune-history.sh` 放寬（見 setup.md〈執行紀錄〉「調整保存上限」） |
 | 收不到 | session 關閉期間只能靠 Telegram 24 小時 update 回補；加入群組前的訊息；隱私模式未關時沒 @ 的群組訊息 |
 
 已知缺陷：
@@ -180,12 +182,12 @@
 
 ## 多人部署考量
 
-規劃多位主人、多個 AI 共用群組時讀本段。
+規劃多位負責人、多個 AI 共用群組時讀本段。
 
 - **群組 bot 與個人開發分開評估**：群組 bot 盡量唯讀、限定授權群組；各自改 repo 的開發環境需要各自的工作目錄、Git 身分、權限、session、訂閱與審核策略。bot 數量不等於執行環境數量，🚫 不把多人映射到同一個可寫 session 或工作目錄
 - **Claude Code 端隔離**：強化版的群組與權限設定是否讓每位使用者的執行環境完全隔離，需實測，不能只依 allowlist 判定；同使用者的 session 仍讀得到 `.env`
 - **Codex 端隔離**：單 thread 預設不適合直接當多人隔離部署，見〈Codex 端機制〉
-- **額度與限速**：用量集中在執行 bot 的帳號（〈元件與成熟度〉）；強化版 `limits` 跨同一套強化版內所有 bot 合計，不同主人的部署各自計算
+- **額度與限速**：用量集中在執行 bot 的帳號（〈元件與成熟度〉）；強化版 `limits` 跨同一套強化版內所有 bot 合計，不同負責人的部署各自計算
 - **資料檔**：token、AI 憑證、SQLite、JSONL 都需限制檔案權限並訂保留政策
 - **成本觀測**：除 token 外，語音轉錄 API 費用、磁碟占用與日誌中的敏感資料都要分開統計
 

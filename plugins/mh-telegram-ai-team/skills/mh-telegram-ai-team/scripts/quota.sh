@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Claude／Codex 訂閱額度剩餘查詢：唯讀，走各 CLI 官方的非互動額度介面，不啟動對話、不消耗額度
 #
-# 使用情境：溝通員回答「還剩多少額度」、承接任務前評估餘量；log-run.sh 以 --json 取額度快照
+# 使用情境：祕書回答「還剩多少額度」、承接任務前評估餘量；log-run.sh 以 --json 取額度快照
 # 輸出：預設每個額度窗一行 `<ai> <窗口>：剩 N%（重置 <時間>）`；--json 為 {"claude":[…],"codex":[…]}
 #   每窗 {window, remain_pct, resets}；查不到的 AI 值為 null。只有剩餘百分比，無法換算成剩餘 token 數
 # 結束碼：至少一支查得為 0，全數查不到為 1；參數錯誤為 2；缺 jq／timeout 為 127

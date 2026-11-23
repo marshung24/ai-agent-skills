@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Telegram 執行紀錄：Claude Code Stop hook，每次溝通員處理完一則 Telegram 入站即追加一列 JSONL
+# Telegram 執行紀錄：Claude Code Stop hook，每次祕書處理完一則 Telegram 入站即追加一列 JSONL
 #
 # 輸入：stdin 為 Stop hook JSON（取 session_id、transcript_path、last_assistant_message）
 # 輸出：追加到 ${MH_TG_RUNS_LOG:-~/.local/state/mh-telegram-ai-team/runs.jsonl}，stdout 不輸出

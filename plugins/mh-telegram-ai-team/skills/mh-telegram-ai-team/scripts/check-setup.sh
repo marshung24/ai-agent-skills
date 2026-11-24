@@ -34,23 +34,21 @@ out=""   # 暫存的結果行，finish 時才排序輸出
 # 檢查順序依資料相依（jq、token 先行），與步驟順序不同；故結果先暫存，結束時依步驟編號穩定排序
 # say <狀態> <步驟> <訊息>：記一行結果，FAIL 時標記結束碼
 say() { out+="$(printf '%-4s %s %s' "$1" "$2" "$3")"$'\n'; [ "$1" = FAIL ] && fail=1; return 0; }
-# reg_missing <internal.md>：列出未填的必要欄位（祕書暱稱／bot username／bot ID、負責人 user ID／username）
-# 解析模版的表格形狀：〈祕書〉為「欄位｜值」、〈負責人〉為「user ID｜username｜暱稱」；值為空或仍是 <…> 佔位即未填
+# reg_missing <internal.md>：列出未填的必要欄位（bot username、負責人 user ID／username）
+# 解析模版的表格形狀：〈祕書〉為「欄位｜值」、〈負責人〉為「user ID｜username｜暱稱」；值不是帳號格式即未填，每位負責人都要有 username
 reg_missing() {
   awk -F'|' '
     /^## / { sec = $0; next }
     sec ~ /^## 祕書/ && NF >= 3 {
       k = $2; v = $3; gsub(/^ +| +$/, "", k); gsub(/^ +| +$/, "", v)
-      if (k == "暱稱" || k == "bot username" || k == "bot ID") { seen[k] = 1; if (v == "" || v ~ /^<.*>$/) miss[k] = 1 }
+      if (k == "bot username" && v ~ /^@?[A-Za-z0-9_]+/) bot = 1
     }
-    sec ~ /^## 負責人/ && $2 ~ /^ *[0-9]+ *$/ { owner = 1; u = $3; gsub(/ /, "", u); if (u ~ /^@[A-Za-z0-9_]+$/) owner_u = 1 }
+    sec ~ /^## 負責人/ && $2 ~ /^ *[0-9]+ *$/ { owner = 1; u = $3; gsub(/ /, "", u); if (u !~ /^@[A-Za-z0-9_]+$/) no_u = 1 }
     END {
       out = ""
-      if (!seen["暱稱"] || miss["暱稱"]) out = out "祕書暱稱 "
-      if (!seen["bot username"] || miss["bot username"]) out = out "bot username "
-      if (!seen["bot ID"] || miss["bot ID"]) out = out "bot ID "
+      if (!bot) out = out "bot username "
       if (!owner) out = out "負責人 user ID "
-      else if (!owner_u) out = out "負責人 username "
+      else if (no_u) out = out "負責人 username "
       sub(/ $/, "", out); print out
     }' "$1"
 }
@@ -191,7 +189,7 @@ if [ -d "$SEC_DIR" ]; then
     say PASS 6.協作skill "internal.md 已建"
     # 內容：自介與同意的必要欄位已填、無模版佔位；只報欄位名與數量，不輸出值
     miss="$(reg_missing "$reg")"
-    if [ -n "$miss" ]; then say FAIL 6.協作skill "internal.md 未填：$miss（自介會被擋；依 collaboration.md〈自介來源〉）"; else say PASS 6.協作skill "internal.md 祕書、負責人欄位已填"; fi
+    if [ -n "$miss" ]; then say FAIL 6.協作skill "internal.md 未填：$miss（自介會被擋；依 collaboration.md〈自介來源〉）"; else say PASS 6.協作skill "internal.md 必要欄位已填"; fi
     # 引言行（> 開頭）是模版說明，不計
     n="$(cat "$reg" "$SEC_DIR"/data/internal/*.md 2>/dev/null | grep -v '^>' | grep -c '<[^<>]\+>')"
     [ "$n" -gt 0 ] && say FAIL 6.協作skill "internal 登錄殘留 $n 行模版佔位 <…>"

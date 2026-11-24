@@ -43,7 +43,7 @@ description: 程式碼審查（code review / 代碼審核 / 程式審核）。�
 ## 載入規則
 
 - 每次 review 都讀 `references/review-framework.md`（審查框架 + 檢查清單）
-- 自我 review：**先執行 `git diff`** 確認有變更，無變更時直接回報、不載入 references → 有變更時讀 `references/self-review.md`
+- 自我 review：**先依審查對象取得變更**（未指定：`git diff --cached` 與 `git diff`；commit：`git show <commit>`；branch：`git diff main...<branch>`），無變更時直接回報、不載入 references → 有變更時讀 `references/self-review.md`
 - PR review：讀 `references/pr-review.md`（workflow + 輸出模板 + gh API 操作，全部合併於此）
 - 自我 review 不讀 pr-review 相關，反之亦然
 

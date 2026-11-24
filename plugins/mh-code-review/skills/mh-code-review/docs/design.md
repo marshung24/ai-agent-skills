@@ -62,7 +62,7 @@
 ### 檔案結構
 
 ```
-.claude/skills/mh-code-review/
+plugins/mh-code-review/skills/mh-code-review/
 ├── SKILL.md                          # 純路由器：判斷流程、載入規則、角色邊界、審查核心摘要
 ├── references/
 │   ├── review-framework.md           # 共用：審查框架 + 檢查清單 + 術語表
@@ -159,7 +159,7 @@ review 的「觀點偏移」是兩件事——**原始需求**（判定對象：
 裁決語意（五種處置、判定順序、predicate、重開條件）以該指南為**唯一定義點**；`review-framework.md`〈Finding 裁決〉只放 review 用得到的子集，邊界與禁令寫在該節。
 
 ### 刻意不搬進 SKILL.md 的內容
-- `gh api` 指令細節 → 放 `gh-review-api.md`
+- `gh api` 指令細節 → 放 `references/pr-review.md`
 - 工具操作手冊式描述 → 精簡後放 references
 - 禮貌話術或短語表 → 省略
 
@@ -190,7 +190,7 @@ Skill 至少應能正確處理以下場景：
 |------|------|------|
 | Slash command | 不做 | 純靠 description 自動觸發 + 觸發守門即可 |
 | 團隊客製 checklist | 不做 | 目前通用 checklist 已足夠 |
-| gh-review-api 多行留言 | 可補充 | 單行留言已滿足基本需求，有需要時再補 `start_line` + `line` 範例 |
+| 多行留言範例 | ✅ 完成 | 見 `references/pr-review.md` |
 | 自我 review 測試 | 不做 | 不另行驗證 |
 | Token 節省重構 | ✅ 完成 | 方案 C：SKILL.md 瘦身 + 6 檔合併為 3 檔，消除重複，每次 review 只需 2 次 Read |
 | 觸發守門 | ✅ 完成 | 「review 意圖 + 審查對象」雙條件守門，排除泛泛討論與非審查 PR 查詢 |

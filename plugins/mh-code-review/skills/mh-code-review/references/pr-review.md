@@ -140,7 +140,7 @@ gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
   -f side="RIGHT"
 ```
 
-多行留言（問題橫跨多行時）：加上 `-F start_line` 指定起始行
+多行留言（問題橫跨多行時）：加上 `-F start_line` 與 `-f start_side` 指定起始行
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
@@ -148,6 +148,7 @@ gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
   -f path="src/Services/OrderService.php" \
   -f commit_id="$COMMIT" \
   -F start_line=38 \
+  -f start_side="RIGHT" \
   -F line=42 \
   -f side="RIGHT"
 ```
@@ -156,7 +157,7 @@ gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments \
 - `-F line=42` 用大寫 `-F` 傳遞數字，小寫 `-f` 會導致 API 錯誤
 - `path` 是相對於 repo 根目錄的檔案路徑
 - `side` 通常用 `RIGHT`（修改後的版本）
-- 多行留言：`start_line` 為起始行、`line` 為結束行
+- 多行留言：`start_line` 為起始行、`line` 為結束行；`start_line` 與 `start_side` 都必填
 
 **代發邊界規則**：
 - 只有能精準對應到單一檔案/行號的 finding 才發 inline comment

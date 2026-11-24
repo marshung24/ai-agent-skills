@@ -23,9 +23,72 @@ Templates 是一般 Markdown 檔，不是 skill，也不經安裝流程。
 | [mh-humanizer-zh-tw](plugins/mh-humanizer-zh-tw/skills/mh-humanizer-zh-tw/) | 技術文件台灣化與保真微編輯（技術文章、規範、規畫設計、教案、程式註解）：詞彙台灣化、好懂化微調、語意保真；完整去 AI 腔為進階模式（38 種啟用模式） |
 | [mh-telegram-ai-team](plugins/mh-telegram-ai-team/skills/mh-telegram-ai-team/) | 用 Telegram 建立 AI 協作團隊：協助建置 bot 與 Claude Code／Codex 串接，並提供協作規範、通訊流程與訊息模版 |
 
-怎麼選：要一次管好四家、或日後要 `update`／`remove` → 用 repo 附的工具；只用 Claude Code／Codex 且不想 clone → 直接跳到〈自己動手〉的 marketplace 那段。
+怎麼選：只裝一兩家或只要幾個 skill → 〈逐一安裝到各 agent〉；要一次管好四家、或要一次 `update`／`remove` → 跳到〈用 make 統一管理〉。
 
-### 安裝：用 repo 附的工具（make）
+### 安裝：逐一安裝到各 agent
+
+以下以 `mh-code-review` 為例，換成上表其他 skill 名即可。要知道四家的機制差異，讀 [Marketplace 設定指南](docs/marketplace-guide.md)〈四家 agent 的機制對照〉。
+
+#### Claude Code
+
+```
+/plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
+/plugin install mh-code-review@marshung24
+```
+
+更新（終端機執行）：
+
+```bash
+claude plugin marketplace update marshung24
+claude plugin update mh-code-review@marshung24
+```
+
+> 用完整 HTTPS URL 而非 `marshung24/ai-agent-skills` 簡寫：簡寫在 Claude Code 會先試 SSH、不通才改 HTTPS，走哪條隨使用者的 SSH 設定而變。
+
+#### Codex
+
+```bash
+codex plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
+codex plugin add mh-code-review@marshung24
+```
+
+更新（會一次刷新這個 marketplace 已安裝的全部 skill）：
+
+```bash
+codex plugin marketplace upgrade marshung24
+```
+
+#### Antigravity（agy）
+
+```bash
+agy plugin install https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-code-review
+```
+
+只裝一個 skill 就帶 `/tree/main/plugins/<name>`，只給 repo 網址會裝全部；更新就重跑同一行，移除用 `agy plugin uninstall <name>`。
+
+> 若 `~/.gemini/skills/` 有以前手動複製的同名 skill，先刪掉再裝，否則會同時存在兩份；opencode 若曾 symlink 到該處，先移除連結，再依下節改為複製。
+
+#### opencode
+
+opencode 不能直接掃 GitHub 上的 skill 目錄，先 clone 再複製：
+
+```bash
+git clone https://github.com/marshung24/ai-agent-skills.git
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills"
+cp -r ai-agent-skills/plugins/mh-code-review/skills/mh-code-review "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/"
+```
+
+更新（在 clone 的上一層執行；先刪再複製，才不會留下已移除的舊檔）：
+
+```bash
+git -C ai-agent-skills pull &&
+rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/mh-code-review" &&
+cp -r ai-agent-skills/plugins/mh-code-review/skills/mh-code-review "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/"
+```
+
+> opencode 也會掃 `~/.claude/skills/`、`~/.agents/skills/`，那些位置若已有同名 skill 就不必再複製一份。
+
+### 安裝：用 make 統一管理
 
 ```bash
 git clone https://github.com/marshung24/ai-agent-skills.git
@@ -41,64 +104,15 @@ make remove          # 同一個矩陣，起始全空
 make validate        # 離線驗證 manifest 與 skills 結構
 ```
 
-安裝方式是**每個 agent 固定的**：claude／codex 走 marketplace 並從 GitHub 安裝，agy／opencode 走複製。要重新評估這個切法、或想知道四家的機制差異，讀 [Marketplace 設定指南](docs/marketplace-guide.md)〈四家 agent 的機制對照〉。
+安裝方式是**每個 agent 固定的**：claude／codex 走 marketplace、agy 走 plugin，三家都從 GitHub 安裝；opencode 走複製。要重新評估這個切法、或想知道四家的機制差異，讀 [Marketplace 設定指南](docs/marketplace-guide.md)〈四家 agent 的機制對照〉。
 
 `install` 與 `remove` 會跳出 **agent × skill 的二維矩陣**——畫面就是現況，改成什麼就同步成什麼（勾起來是裝、取消是移除），按鍵依畫面下方提示，確定後會先印出逐 agent 的增減再執行。
 
-> claude／codex **預設從 GitHub 安裝**，此模式下工作目錄裡未 push 的修改不會生效；要測本機改動得加 `SOURCE=$PWD` 改用工作目錄當來源。
+> claude／codex／agy **預設從 GitHub 安裝**，此模式下工作目錄裡未 push 的修改不會生效；要測本機改動得加 `SOURCE=$PWD` 改用工作目錄當來源。
 
 > **重複載入的防線**：兩種機制並存時同一個 skill 會載入兩次，因此安裝前會偵測另一種機制的殘留（舊版工具裝的、手動複製的），偵測到即中止並提示如何處理；確定要並存才加 `FORCE=1`。`remove` 一律兩邊都清。另外 opencode 會**順便掃 `~/.claude/skills/`**，那裡若已有這批 skill，它就已經吃得到了，不必再裝一次。
 
 這套工具只管 Skills，不會安裝或驗證 `templates/`。要查變數、狀態碼、矩陣完整按鍵，或安裝失敗要排查時，讀 [tools/README.md](tools/README.md)。
-
-### 安裝：自己動手（不使用 make 工具時）
-
-不想 clone、或要自行控制安裝目錄與 symlink 時。
-
-**Claude Code／Codex：走 marketplace**
-
-以下以 `mh-code-review` 為例，換成上表其他 skill 名即可。
-
-```
-/plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
-/plugin install mh-code-review@marshung24
-```
-
-```bash
-codex plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
-codex plugin add mh-code-review@marshung24
-```
-
-> 用完整 HTTPS URL 而非 `marshung24/ai-agent-skills` 簡寫：簡寫在 Claude Code 預設以 SSH clone，沒有 SSH 金鑰會直接失敗（要另設 `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`）。
-
-**agy／opencode：手動複製**
-
-這兩家不支援 marketplace，只能靠目錄掃描；機制差異見〈用 repo 附的工具〉指的那份 Marketplace 設定指南。
-
-| Agent | 使用者級 skills 目錄 |
-|-------|---------------------|
-| Antigravity（agy） | `~/.gemini/skills/<skill>/` |
-| opencode | `~/.config/opencode/skills/<skill>/`（受 `$XDG_CONFIG_HOME` 影響） |
-
-專案級：agy 看 `.gemini/skills/`，opencode 另看 `.opencode/`、`.claude/`、`.agents/` 底下的 `skills/`。
-
-```bash
-cp -r plugins/mh-code-review/skills/mh-code-review ~/.gemini/skills/
-```
-
-agy 另可用 `agy plugin install ./plugins/<name>` 單獨安裝某個 skill（每個 plugin 目錄都自帶 `plugin.json`）。
-
-兩家都要就裝一份、另一家用 symlink 指過去，避免重複複製：
-
-```bash
-ln -s ~/.gemini/skills/mh-code-review ~/.config/opencode/skills/mh-code-review
-```
-
-> **注意**：symlink 的相對路徑是相對**連結所在目錄**解析，與執行時的工作目錄無關，因此 `ln -s ../../../.gemini/skills/<skill> ~/.config/opencode/skills/<skill>` 是安全的，整個家目錄搬移後也仍然有效。絕對路徑則相反——家目錄路徑一變就斷。兩種都可用，擇一即可。
-
-> opencode 的掃描路徑不只上表這一處（另含 `~/.claude/skills/`、`~/.agents/skills/`），那些位置若已有這批 skill 就不必再複製一份。
-
-> 手動複製沒有 `make install` 的殘留偵測：同一個 skill 若又以別的方式裝過（例如 `agy plugin install`），會重複載入，得自己留意。
 
 ## Templates
 
@@ -121,7 +135,7 @@ cp templates/AGENTS.md <專案>/AGENTS.md
 3. 條文與該 repo 既有規範衝突時，以 repo 規範為準就地改寫，不另開例外段落
 4. 刪掉與該專案無關的條文——這份檔每個 session 都佔 context
 
-`AGENTS.md` 是 Codex、agy 與 opencode 共通的專案指令檔；**Claude Code 不讀它、只讀 `CLAUDE.md`**，因此在專案根目錄補一個 symlink，四家共用同一份：
+`AGENTS.md` 是 Codex、agy 與 opencode 共通的專案指令檔。Claude Code 2.1.277 起，專案沒有自己的 `CLAUDE.md`（含上層目錄與 `CLAUDE.local.md`）時也會讀它，有的話只讀 `CLAUDE.md`（條件見[官方說明](https://code.claude.com/docs/en/memory#agentsmd)）。要四家都確定讀到同一份，在專案根目錄的 `CLAUDE.md` 第一行寫 `@AGENTS.md`；不需要 Claude 專屬內容時也可改用 symlink：
 
 ```bash
 cd <專案> && ln -s AGENTS.md CLAUDE.md

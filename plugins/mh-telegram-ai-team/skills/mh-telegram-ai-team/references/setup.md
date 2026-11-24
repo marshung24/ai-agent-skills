@@ -39,7 +39,7 @@
 ```text
 ~/secretary/                 # 預設路徑，可改；🚫 不得是 git repo（含 ID 與個資）
 ├── AGENTS.md                # 唯一宣告資料目錄與載入規則，內容見 collaboration.md〈登錄檔〉；選用段落見 assets/agents-policy.md
-├── CLAUDE.md                # 只寫一行：先讀同目錄 AGENTS.md
+├── CLAUDE.md                # 只寫一行 @AGENTS.md，載入同一份內容
 ├── .claude/settings.json    # Claude Code：只在此啟用 telegram plugin；執行紀錄 hook 也放這
 └── data/                    # 資料目錄：internal.md、external.md、backlog/、workspaces.md（建檔用，見 internal-setup.md）
 ```

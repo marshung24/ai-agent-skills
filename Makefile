@@ -12,7 +12,8 @@
 # 安裝方式則是 per-agent 固定的，沒有選項：
 #   claude／codex ─ marketplace：兩家吃同一份 .claude-plugin/marketplace.json，
 #                   且能直接吃 Git URL；來源預設為 manifest 的 repository
-#   agy／opencode ─ copy：直接複製進該 agent 的使用者級 skills 目錄
+#   agy         ─ plugin：從 GitHub 子目錄 URL 逐 skill 安裝，無 marketplace
+#   opencode    ─ copy：直接複製進該 agent 的使用者級 skills 目錄
 #
 # 另一種機制的殘留（舊版工具裝的、手動複製的）仍會被同時載入而重複，
 # 故 install 前會偵測並擋下（FORCE=1 可略過），remove 一律兩邊都清。
@@ -37,7 +38,7 @@ endif
 .PHONY: help status install remove update validate
 
 # 目標後的 `## 說明` 由 help 自動擷取，新增目標不必回頭改說明（避免兩處不同步）
-status:   ## 顯示安裝現況（plugin 與 copy 兩種方式一起列）
+status:   ## 顯示安裝現況（含另一種機制的殘留）
 	@$(TOOL) status
 
 install:  ## 安裝到所有 agent
@@ -46,7 +47,7 @@ install:  ## 安裝到所有 agent
 update:   ## 更新已安裝的內容
 	@$(TOOL) update
 
-remove:   ## 移除（plugin 模式連 marketplace 一起註銷）
+remove:   ## 移除（全部移除時連 marketplace 一起註銷）
 	@$(TOOL) remove
 
 validate: ## 離線驗證 manifest 與 skills 結構，不動任何 agent 設定
@@ -63,7 +64,7 @@ help:     ## 顯示本說明
 	@printf '  install／remove 會跳矩陣，直接在格子上逐 agent 取捨，不需要另外指定\n'
 	@printf '\n變數：\n'
 	@printf '  %-10s %s\n' SKILLS '只處理指定的 skill（只加不減）；不設＝跳矩陣'
-	@printf '  %-10s %s\n' SOURCE '覆寫 marketplace 來源；開發時裝工作目錄的內容用 SOURCE=$$PWD'
+	@printf '  %-10s %s\n' SOURCE '覆寫 marketplace／plugin 來源；開發時裝工作目錄的內容用 SOURCE=$$PWD'
 	@printf '  %-10s %s\n' FORCE  '1 ＝略過「另一種機制留有殘留」的偵測（會造成 skill 重複載入）'
 	@printf '\n範例：\n'
 	@printf '  %-46s %s\n' 'make status'                                   '看各家現況（有殘留才會多列出來）'

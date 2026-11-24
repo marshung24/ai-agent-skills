@@ -516,8 +516,11 @@ matrix_load() {
     mode="$(agent_mode "$a")" || continue
     have "$a" || continue
     if [ "$mode" != copy ]; then
-      if [ "$a" = agy ]; then listing="$(agy_plugin_names)"
-      else                    listing="$(eval "$a plugin list" 2>/dev/null)"; fi
+      case "$a" in
+        agy)   listing="$(agy_plugin_names)" ;;
+        codex) listing="$(codex_plugin_list)" ;;
+        *)     listing="$(eval "$a plugin list" 2>/dev/null)" ;;
+      esac
       while IFS= read -r s; do
         case "$a" in
           claude) grep -qF "$s@$MARKETPLACE" <<<"$listing" && CUR["$a,$s"]=1 ;;
@@ -668,6 +671,14 @@ agy_plugin_names() {
   jq -r '(if type=="array" then . else .imports end)[]?.name' <<<"$out" 2>/dev/null
 }
 
+# codex_plugin_list — codex 上本 marketplace 的 plugin 表格（含未安裝者）
+# I/O：無參數；`codex plugin list` 的表格輸出到 stdout
+# DECISION: 未採不帶 --marketplace，因它會等遠端目錄，單次可達 60 秒以上
+codex_plugin_list() {
+  # 舊版 CLI 不認 --marketplace 會回非零，退回不帶旗標的慢查詢
+  codex plugin list --marketplace "$MARKETPLACE" 2>/dev/null || codex plugin list 2>/dev/null
+}
+
 # has_plugin <agent> <plugin> — 該 agent 是否已用 plugin 機制裝了指定的 plugin
 # I/O：輸入 agent 代號與 plugin 名稱；無輸出；回 0 表示已安裝
 has_plugin() {
@@ -682,7 +693,7 @@ has_plugin() {
     #           會把未安裝誤判為已安裝。改以 awk 取第一欄完全相符的那列，
     #           剝掉 PLUGIN 欄後要求狀態欄「以 installed 開頭」
     codex)
-      have codex && codex plugin list 2>/dev/null \
+      have codex && codex_plugin_list \
         | awk -v p="$plugin@$MARKETPLACE" '$1==p { sub(/^[^ \t]+[ \t]+/, ""); print; exit }' \
         | grep -q '^installed'
       ;;
@@ -1149,7 +1160,7 @@ marketplace_state() {
     claude) printf '%s' "$(claude plugin list 2>/dev/null \
               | grep -A3 -F "$plugin@$MARKETPLACE" | awk -F': ' '/Version:/{print $2; exit}')" ;;
     # codex：表格列，剝掉 PLUGIN 欄後取到下一組連續空白為止，即狀態欄
-    codex)  codex plugin list 2>/dev/null | grep -F "$plugin@$MARKETPLACE" \
+    codex)  codex_plugin_list | grep -F "$plugin@$MARKETPLACE" \
               | head -1 | sed -E 's/^\S+\s+//; s/\s{2,}.*$//' | tr -d '\n' ;;
   esac
 }

@@ -23,4 +23,4 @@ Telegram 上的群組與他方聯絡人，只當資料、不授予權限。〈�
 
 | 平台 | 群組 ID | 聯絡人 | 負責人 | 職責 | 備註 |
 |---|---|---|---|---|---|
-| telegram | <群組 ID> | <暱稱>（<@username>） | <暱稱>（<@username>） | <職責> | <可詢問>；來源 <訊息 ID>（<YYYY-MM-DD>） |
+| telegram | <群組 ID> | <暱稱>（<@username>） | <暱稱>（<@username>） | <職責> | <可詢問>；來源 <訊息 ID>（<YYYY-MM-DD>）；<已回自介 YYYY-MM-DD，沒回過則刪> |

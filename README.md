@@ -178,3 +178,7 @@ plugins/mh-<name>/           # 一個 plugin＝一個 skill，marketplace 的 so
 ## License
 
 [MIT](LICENSE)
+
+## 備註
+
+- **macOS 建議安裝 Homebrew bash**：系統內建 bash 為 3.2 過舊，腳本在 macOS 的行為以新版為準。執行 `brew install bash`，並確認 `bash --version` 為 5.x（`mh-telegram-ai-team` 的 `check-setup.sh` 會偵測並警告）

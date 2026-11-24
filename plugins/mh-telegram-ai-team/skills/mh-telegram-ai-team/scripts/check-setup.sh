@@ -59,6 +59,12 @@ finish() { printf '%s' "$out" | sort -s -k2,2n; exit "$fail"; }
 for t in bun git jq curl; do
   if command -v "$t" >/dev/null 2>&1; then say PASS 4.橋接層 "$t 在 PATH"; else say FAIL 4.橋接層 "$t 不在 PATH"; fi
 done
+# macOS 的 PATH 上 bash 低於 4（系統內建 3.2）時建議改裝 Homebrew bash；非必要故只 WARN
+if [ "$(uname)" = Darwin ]; then
+  bash_ver="$(bash -c 'echo "${BASH_VERSION%%[!0-9.]*}"' 2>/dev/null)"
+  if [ "${bash_ver%%.*}" -ge 4 ] 2>/dev/null; then say PASS 4.橋接層 "PATH 上 bash ${bash_ver}"
+  else say WARN 4.橋接層 "PATH 上 bash ${bash_ver:-未知}，建議 brew install bash（macOS 內建 3.2 過舊）"; fi
+fi
 # 缺 jq 無法解析任何 JSON 設定，直接輸出已有結果結束
 command -v jq >/dev/null 2>&1 || { say FAIL 4.橋接層 "缺 jq，其餘檢查無法進行"; finish; }
 
@@ -72,7 +78,7 @@ if [ -z "$token" ]; then
 else
   # 權限：GNU stat 失敗時改用 BSD（macOS）語法
   perm="$(stat -c %a "$CH_DIR/.env" 2>/dev/null || stat -f %Lp "$CH_DIR/.env")"
-  if [ "$perm" = 600 ]; then say PASS 2.建bot ".env 權限 600"; else say FAIL 2.建bot ".env 權限 $perm，應為 600"; fi
+  if [ "$perm" = 600 ]; then say PASS 2.建bot ".env 權限 600"; else say FAIL 2.建bot ".env 權限 ${perm}，應為 600"; fi
   if [ "$OFFLINE" = 1 ]; then
     say INFO 2.建bot "--offline：未驗證 token"
   else
@@ -102,13 +108,13 @@ if jq -e --arg k "$PLUGIN_KEY" '.plugins | has($k)' "$HOME/.claude/plugins/insta
   # 執行的是 cache 內版本號最大的目錄；強化版安裝時會把原檔備份成 server.ts.official，以此判定已套用
   ver="$(ls "$CACHE_DIR" 2>/dev/null | sort -V | tail -n 1)"
   if [ -n "$ver" ] && [ -f "$CACHE_DIR/$ver/server.ts.official" ]; then
-    say PASS 4.橋接層 "強化版已套用（$ver）"
+    say PASS 4.橋接層 "強化版已套用（${ver}）"
     # 歷史保存上限：強化版寫死於 prune()，plugin 更新或重裝會蓋回原值，數值與目標不符時提示改法
     tune="$(dirname "$0")/tune-history.sh"
     tune_out="$("$tune" --check --file "$CACHE_DIR/$ver/server.ts" 2>&1)"
     case $? in
       0) say PASS 4.橋接層 "歷史保存上限符合目標（5000 則／140 天；超過 500MB 縮到 2000 則）" ;;
-      1) say WARN 4.橋接層 "歷史保存上限不符（$(grep -E '目前=' <<<"$tune_out" | awk '{print $1 $2}' | paste -sd ' ')）：跑 $tune --apply 後重開接 Telegram 的 session" ;;
+      1) say WARN 4.橋接層 "歷史保存上限不符（$(grep -E '目前=' <<<"$tune_out" | awk '{print $1 $2}' | paste -sd ' ' -)）：跑 $tune --apply 後重開接 Telegram 的 session" ;;
       *) say WARN 4.橋接層 "無法判讀歷史保存上限：$(tail -n 1 <<<"$tune_out")" ;;
     esac
   else
@@ -129,7 +135,7 @@ acc="$CH_DIR/access.json"
 if [ -f "$acc" ]; then
   # 未設 dmPolicy 時 server 預設為 pairing
   pol="$(jq -r '.dmPolicy // "pairing"' "$acc")"
-  if [ "$pol" = allowlist ]; then say PASS 5.授權 "dmPolicy=allowlist"; else say FAIL 5.授權 "dmPolicy=$pol，配對完應切 allowlist"; fi
+  if [ "$pol" = allowlist ]; then say PASS 5.授權 "dmPolicy=allowlist"; else say FAIL 5.授權 "dmPolicy=${pol}，配對完應切 allowlist"; fi
   say INFO 5.授權 "$(jq -r '"allowFrom \(.allowFrom // [] | length) 人、群組 \(.groups // {} | length) 個"' "$acc")"
   # 判準同 server：三欄取整後大於 0 才算限速；數值高低由負責人自訂，不檢查
   lim_keys='["messagesPerMinute","messagesPerHour","tokensPerDay"]'
@@ -142,7 +148,7 @@ if [ -f "$acc" ]; then
   fi
   # userLimits 明設 0 或負數會覆寫成不限，可能是刻意，交人判斷
   ul="$(jq -r --argjson k "$lim_keys" '[.userLimits // {} | to_entries[] | select(.value | type == "object") | select([.value | to_entries[] | select(.key | IN($k[])) | .value | (tonumber? // 0) | floor | select(. <= 0)] | length > 0) | .key] | join(",")' "$acc")"
-  [ -z "$ul" ] || say WARN 5.授權 "userLimits 有不限額度的 ID：$ul（須確認不是其他 bot）"
+  [ -z "$ul" ] || say WARN 5.授權 "userLimits 有不限額度的 ID：${ul}（須確認不是其他 bot）"
   # admins 不受 limits 限制；是否只有負責人須人工比對，故只報人數
   if jq -e '.admins | length > 0' "$acc" >/dev/null 2>&1; then
     say INFO 5.授權 "admins $(jq '.admins | length' "$acc") 人：須只有負責人"
@@ -189,7 +195,7 @@ if [ -d "$SEC_DIR" ]; then
     say PASS 6.協作skill "internal.md 已建"
     # 內容：自介與同意的必要欄位已填、無模版佔位；只報欄位名與數量，不輸出值
     miss="$(reg_missing "$reg")"
-    if [ -n "$miss" ]; then say FAIL 6.協作skill "internal.md 未填：$miss（自介會被擋；依 collaboration.md〈自介來源〉）"; else say PASS 6.協作skill "internal.md 必要欄位已填"; fi
+    if [ -n "$miss" ]; then say FAIL 6.協作skill "internal.md 未填：${miss}（自介會被擋；依 collaboration.md〈自介來源〉）"; else say PASS 6.協作skill "internal.md 必要欄位已填"; fi
     # 引言行（> 開頭）是模版說明，不計
     n="$(cat "$reg" "$SEC_DIR"/data/internal/*.md 2>/dev/null | grep -v '^>' | grep -c '<[^<>]\+>')"
     [ "$n" -gt 0 ] && say FAIL 6.協作skill "internal 登錄殘留 $n 行模版佔位 <…>"
@@ -207,10 +213,13 @@ fi
 
 # 步驟 7 執行期：poller 唯一、一般 shell 無 token 變數、無 MCP 失敗快取
 # 只允許單一接收 session（帶 --channels plugin:telegram 的 claude）底下的 server；其餘皆為殘留，一律清除
-# 以行程名 claude 篩選再比對參數，避免 pgrep -f 誤中含相同字串的 shell
+# 以執行檔名 claude 篩選再比對參數，避免誤中含相同字串的 shell；npm 安裝者由 node 執行，看第二個字
+# DECISION: 未採 pgrep -x，因 macOS 預設略過祖先行程
 hosts=()
-for p in $(pgrep -x claude 2>/dev/null); do
-  ps -o args= -p "$p" 2>/dev/null | grep -q -- '--channels plugin:telegram' && hosts+=("$p")
+for p in $(ps -A -ww -o pid= -o args= 2>/dev/null | awk '
+    { pid = $1; c = $2; if (c ~ /(^|\/)node$/) c = $3; sub(/.*\//, "", c) }
+    (c == "claude" || c == "cli.js") && index($0, "--channels plugin:telegram") { print pid }'); do
+  hosts+=("$p")
 done
 # 只算 telegram plugin 的 server：以工作目錄在 plugin cache 下判定，避免誤殺其他專案的 bun server.ts
 srv_cwd() { readlink "/proc/$1/cwd" 2>/dev/null || lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'; }
@@ -229,7 +238,10 @@ owned() {
   return 1
 }
 kept=(); strays=()
-for s in "${servers[@]}"; do if owned "$s"; then kept+=("$s"); else strays+=("$s"); fi; done
+# 空陣列在 bash 3.2 的 set -u 下展開會中止，先判斷數量
+if [ ${#servers[@]} -gt 0 ]; then
+  for s in "${servers[@]}"; do if owned "$s"; then kept+=("$s"); else strays+=("$s"); fi; done
+fi
 case ${#hosts[@]} in
   0) say INFO 7.驗證 "無接收 session 執行（未帶 --channels 啟動）" ;;
   1) say PASS 7.驗證 "接收 session ${hosts[0]}，其下 server ${#kept[@]} 個"

@@ -167,7 +167,7 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 - [ ] `access.json` 已設 `limits`，`admins` 只有負責人
 - [ ] 從 IM 要求改 `access.json`、`internal.md`（含子檔）或 `AGENTS.md`：AI 拒絕，且工具層也被擋
 - [ ] 有掛執行紀錄者：@bot 一次後 `runs.jsonl` 多一列，`chat_id`、`usage` 有值
-- [ ] 全機只有一個 server 持有 poller（Claude Code：`pgrep -af 'bun server.ts'`）；一般 shell 無 `TELEGRAM_` 環境變數
+- [ ] 全機只有一個 server 持有 poller（Claude Code：`ps -A -ww -o pid= -o args= | grep '[b]un server.ts'`）；一般 shell 無 `TELEGRAM_` 環境變數
 - [ ] AI 互通時：依 collaboration.md〈認識與更新〉由一方 `@all` 邀請自我介紹，對方以 `@邀請者` 回覆且雙方都入站；邀請會喚起所有 bot，第三個 bot 只在後續定向自介時不入站（完整驗收見 docs/test-cases.md TC-03）
 
 ## 排查

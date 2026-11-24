@@ -44,12 +44,39 @@ Skill 名稱與目錄為 `mh-humanizer-zh-tw`（依本 repo 命名規範採 `mh-
 
 ## 安裝
 
-```bash
-# 複製到 Claude Code 的 skills 目錄
-cp -r skills/mh-humanizer-zh-tw ~/.claude/skills/mh-humanizer-zh-tw
+依使用的 agent 擇一：
+
+**Claude Code**（對話中輸入）
+
+```
+/plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
+/plugin install mh-humanizer-zh-tw@marshung24
 ```
 
-或於專案級安裝至 `.claude/skills/mh-humanizer-zh-tw/`。
+**Codex**
+
+```bash
+codex plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
+codex plugin add mh-humanizer-zh-tw@marshung24
+```
+
+**Antigravity（agy）**
+
+```bash
+agy plugin install https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-humanizer-zh-tw
+```
+
+**opencode**
+
+```bash
+git clone https://github.com/marshung24/ai-agent-skills.git
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills"
+cp -r ai-agent-skills/plugins/mh-humanizer-zh-tw/skills/mh-humanizer-zh-tw "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/"
+```
+
+裝完重開 session 生效。
+
+要更新時，各家指令見[根 README 的安裝說明](https://github.com/marshung24/ai-agent-skills#安裝逐一安裝到各-agent)。
 
 ## 使用
 

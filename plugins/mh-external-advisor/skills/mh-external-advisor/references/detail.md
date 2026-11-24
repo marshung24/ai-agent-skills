@@ -109,7 +109,7 @@ advisor-usage.sh    [--advisor <ai>] [--scope <s>] [--since <d>] [--json]  # 用
 
 `version` 是本工具寫入時蓋的 **schema 戳記**，供日後欄位改名時判斷要不要 migrate；reader 不讀它。
 
-安裝流程末端會經 `scripts/post-install-check.sh` 呼叫 `check` 一次，機制見 [tools/README.md](../../../../tools/README.md)〈安裝後自檢〉。
+安裝流程末端會經 `scripts/post-install-check.sh` 呼叫 `check` 一次，機制見 [tools/README.md](https://github.com/marshung24/ai-agent-skills/blob/main/tools/README.md#安裝後自檢)〈安裝後自檢〉。
 
 ## 輸出契約
 
@@ -136,7 +136,7 @@ advisor-usage.sh    [--advisor <ai>] [--scope <s>] [--since <d>] [--json]  # 用
 ```bash
 err=$(mktemp)
 ai=codex   # 本次受詢的顧問名（codex/claude/opencode/agy），同時決定腳本與比對字樣
-out=$(scripts/ask-"$ai".sh "問題" 2>"$err")
+out=$(scripts/ask-"$ai".sh --scope explore "問題" 2>"$err")
 rc=$?
 # 先 tail -n1 只看最後一行再比對——回覆內容本身可能引用同格式字樣（如請顧問
 # review 本 skill 時），逐行比對會誤抓出多筆
@@ -145,7 +145,7 @@ rc=$?
 id=$(printf '%s' "$out" | tail -n1 | sed -n "s/^\[External Advisor $ai session_id: \(..*\)\]\$/\1/p")
 # 契約警告一律認行首，不比對全文——CLI 診斷訊息中段可能夾帶 [warn] 字樣
 grep -q '^\[warn\]' "$err" && id=""
-[ "$rc" -eq 0 ] && [ -n "$id" ] && scripts/ask-"$ai".sh -r "$id" "追問"
+[ "$rc" -eq 0 ] && [ -n "$id" ] && scripts/ask-"$ai".sh --scope explore -r "$id" "追問"
 rm -f "$err"
 ```
 

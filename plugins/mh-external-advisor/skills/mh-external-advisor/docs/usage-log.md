@@ -96,7 +96,8 @@ throttle_decision ──▶ call_attempted ──▶ call_finished
 | 額度用盡 | 5 | `throttle_decision: deny` |
 | CLI 執行失敗 | 1 | `allow` → `attempted` → `finished(rc=1)` |
 | CLI 回傳但無可用回覆 | 1 | 同上 |
-| resume 失效 | 3 | `allow` → `attempted` → `finished(rc=3)` |
+| resume 失效（agy 前置檢查擋下） | 3 | **無**（在扣桶之前） |
+| resume 失效（其餘） | 3 | `allow` → `attempted` → `finished(rc=3)` |
 | 被 SIGKILL | — | `allow` → `attempted`，**無 finished** → 結果未知 |
 
 結束事件掛在 adapter 的 `EXIT` trap 上，不是逐條失敗路徑各寫一次——中途 exit 的路徑太多（CLI 失敗、resume 失效、解析失敗），逐條補必定漏。

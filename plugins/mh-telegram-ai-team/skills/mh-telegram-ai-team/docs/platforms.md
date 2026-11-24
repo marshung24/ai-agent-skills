@@ -85,7 +85,7 @@
 | 單一 poller（官方版） | 相反：新 server SIGTERM 舊的 | 原始碼；全域啟用時一般 session 會搶走 poller（實測） |
 | 跨環境同 token | host 與容器共用 token 會互踢，每則訊息只有一邊收到，發訊不受影響；鎖檔只對同機 PID 空間有效，`access.json` 也各自獨立 | 依程式碼與 Telegram 機制推論，未實測 |
 | 失敗快取 | MCP 連線失敗記入 `~/.claude/mcp-needs-auth-cache.json`，以 server 名稱與設定 id 為鍵、跨 session 共用、不分環境變數，約 15 分鐘內同名 server 直接略過；之後連線成功也不會清掉該筆 | 實測 |
-| 子行程 | 接 Telegram 的 session 內再啟動的 `claude`（含外部顧問）不繼承 `--settings`，plugin 維持停用、不起 server | 依啟用機制推論，未實測 |
+| 子行程 | 在祕書目錄內再啟動的 `claude`（含外部顧問）會讀到同一份 `.claude/settings.json`，plugin 可能啟用並起 server；其他目錄須依其有效設定判斷，不保證停用 | 依啟用機制推論，未實測 |
 | 狀態目錄 | 強化版寫死預設路徑、不讀 `TELEGRAM_STATE_DIR`；多 session 各用一個 bot 並以不同 `TELEGRAM_STATE_DIR` 隔開，只有官方 server 支援 | 原始碼 |
 
 單一 session 接收的做法見 setup.md〈Claude Code 端〉步驟 5。

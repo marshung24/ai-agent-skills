@@ -1,6 +1,6 @@
 # mh-external-advisor
 
-> **版本**：2.4.0｜**更新日期**：2026-09-03
+> **版本**：2.4.1｜**更新日期**：2026-11-24
 
 外部顧問：把另一個 AI CLI（Codex、Claude、Opencode 或 Antigravity）當顧問諮詢——非互動送出 prompt、取回回覆，並以明確 id 延續同一段對話，用於第二意見、交叉驗證、盲點檢查等需要異質觀點的場景。
 
@@ -31,7 +31,45 @@ mh-external-advisor/
     └── usage-analysis.md    # 用量分析：算得出什麼、哪些指標會誤導、報表與圖表界線
 ```
 
+## 安裝
+
+依使用的 agent 擇一：
+
+**Claude Code**（對話中輸入）
+
+```
+/plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
+/plugin install mh-external-advisor@marshung24
+```
+
+**Codex**
+
+```bash
+codex plugin marketplace add https://github.com/marshung24/ai-agent-skills.git
+codex plugin add mh-external-advisor@marshung24
+```
+
+**Antigravity（agy）**
+
+```bash
+agy plugin install https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-external-advisor
+```
+
+**opencode**
+
+```bash
+git clone https://github.com/marshung24/ai-agent-skills.git
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills"
+cp -r ai-agent-skills/plugins/mh-external-advisor/skills/mh-external-advisor "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills/"
+```
+
+裝完重開 session 生效。
+
+要更新時，各家指令見[根 README 的安裝說明](https://github.com/marshung24/ai-agent-skills#安裝逐一安裝到各-agent)。
+
 ## 快速使用
+
+裝好後在對話中直接說即可，例如「請 codex 審核這次的改動」；以下是腳本的直接用法（路徑相對本 skill 目錄）：
 
 ```bash
 # 1. 首次使用：設定你實際擁有的 AI（只需一次，寫入耐久設定檔）
@@ -44,6 +82,14 @@ scripts/advisor-list.sh
 scripts/ask-codex.sh --scope explore "幫我看這段邏輯有沒有問題：…"
 scripts/ask-codex.sh --scope unblock -r <id> "那如果併發呼叫呢？"
 ```
+
+**用 alias 開場就指定顧問**：自主諮詢本來就預設開啟，這個 alias 是把顧問固定成 codex，並省去每次開 session 後再講一次。寫進 `~/.bashrc`：
+
+```bash
+alias ccc='claude --dangerously-skip-permissions "啟動外部顧問自主模式，顧問用 codex"'
+```
+
+`source ~/.bashrc` 後，以 `ccc` 開啟 session。`--dangerously-skip-permissions` 會讓**主 AI** 也跳過權限詢問，只在〈安全前提〉所列的環境使用；不符合就拿掉這個旗標，呼叫顧問時會照常詢問。換顧問時改 `codex` 這個名字，但要是啟用清單裡的。
 
 想確認顧問還剩多少訂閱額度：`scripts/advisor-quota.sh [<ai>...]`——走各 CLI 官方的非互動額度介面，只查額度、不諮詢、不消耗額度（opencode 無此介面）。
 

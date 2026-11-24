@@ -1,6 +1,6 @@
 # tools/
 
-> **版本**：5.1.0｜**更新日期**：2026-08-02
+> **版本**：6.0.0｜**更新日期**：2026-11-24
 
 把本 repo 的 skills 安裝到各 AI agent。每個 skill 各自是一個 plugin，`install` 與 `remove` 會跳選單讓你挑；每個 agent 的安裝方式則是固定的，並在安裝前偵測另一種機制的殘留以免重複載入。
 
@@ -12,40 +12,42 @@
 |-------|------|------------------------|---------|
 | Claude Code | `marketplace` | `.claude-plugin/marketplace.json` | 本機路徑、`owner/repo`、Git URL |
 | Codex CLI | `marketplace` | 同一份 manifest | 本機路徑、`owner/repo[@ref]`、Git URL |
-| Antigravity（agy） | `copy` | `~/.gemini/skills/` | — |
+| Antigravity（agy） | `plugin` | 各 plugin 目錄的 `plugin.json`；裝到 `~/.gemini/config/plugins/` | 本機路徑、`owner/repo`、GitHub URL |
 | opencode | `copy` | `${XDG_CONFIG_HOME:-~/.config}/opencode/skills/` | — |
 
 **為什麼這樣切**：
 
-- **claude／codex 走 marketplace** — 兩家吃同一份 manifest，而且能直接吃 Git URL，安裝與更新都交給各家 CLI 處理，是真正可發佈給別人的途徑。
-- **agy 走 copy** — 它的 plugin 機制**是可用的**（實測 `agy plugin install <目錄>` 會匯入 skills），但只收本機目錄、不吃 Git URL，也無法用 manifest 發佈 catalog（那組 marketplace 來源註冊在 CLI 內部）。走 plugin 換不到任何 copy 沒有的好處，卻多一層要維護的狀態，所以本工具對 agy 只走 copy。
-- **opencode 走 copy** — 它沒得選：opencode 的 plugin 是 JS/TS 模組（掛 hook、加 tool），不承載 skills。skills 一律靠目錄掃描。
+- **claude／codex 走 marketplace** — 兩家吃同一份 manifest，能註冊本 repo 為 marketplace，安裝與更新都交給各家 CLI 處理。
+- **agy 走 plugin** — 它不能註冊第三方 marketplace，但 `agy plugin install` 收本機目錄與 GitHub 子目錄 URL，可逐 skill 安裝。GitHub 來源固定取 `main` 分支；它沒有 `plugin update`，更新就是重裝（會取代舊內容）。安裝、更新、移除與執行期載入皆已實測（1.5.15）。
+- **opencode 走 copy** — 它的 plugin 是 JS/TS 套件，不吃本 repo 的 manifest；設定檔的 `skills` 可指向 HTTP 目錄，但要另外維護 `index.json`。
 
 因為每個 agent 只有一種方式，**沒有 `METHOD` 這個變數**。
 
 ### marketplace 來源
 
-預設從 manifest 各 entry 中第一個非 null 的 `repository` 推導出 GitHub HTTPS URL，不寫死在腳本裡。**用 HTTPS URL 而非 `owner/repo` 簡寫**：簡寫在 Claude Code 預設走 SSH clone，沒有金鑰的使用者會直接失敗（要另設 `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`）；HTTPS URL 兩家都收，也不依賴使用者的 SSH 設定。
+預設從 manifest 各 entry 中第一個非 null 的 `repository` 推導出 GitHub HTTPS URL，不寫死在腳本裡。**用 HTTPS URL 而非 `owner/repo` 簡寫**：簡寫在 Claude Code 會先試 SSH、不通才改 HTTPS，走哪條隨使用者的 SSH 設定而變；HTTPS URL 兩家都收，行為固定。
 
-> **開發時裝工作目錄的內容**：`SOURCE=$PWD tools/skills.sh install`。預設來源是 GitHub，改了工作目錄的檔案不會反映到 claude／codex，必須 commit 並 push 才拿得到。
+> **開發時裝工作目錄的內容**：`SOURCE=$PWD tools/skills.sh install`。預設來源是 GitHub，改了工作目錄的檔案不會反映到 claude／codex／agy，必須 commit 並 push 才拿得到。
 
 ### manifest 的幾個選擇
 
 - **佈局是 `plugins/<name>/skills/<name>/`**：`source` 指向 `./plugins/<name>`，plugin root 底下就是合格的 `skills/`，所以**不需要 `skills` 欄位**。這樣各 agent 的快取只含該 plugin 的內容（實測 508K → 64K），不是整個 repo 複製 N 份。
 - **每個 skill 都必須有自己的 entry**：**新增 skill 一定要同步加一個 entry**，否則使用者裝不到。`make validate` 雙向檢查（skill 沒 entry、entry 的 source 不存在，都會擋）。
-- **每個 plugin 目錄自帶 `plugin.json`**：讓 agy 可以 `agy plugin install ./plugins/<name>` 單獨安裝——舊佈局做不到，當時 agy 只認 repo 根目錄那份，一裝就是全部。
-- **不設 `version`**：省略時 Claude／Codex 以 git commit SHA 判定更新，push 完使用者 `update` 就拿得到；設了則會釘住版本字串，每次發布都要記得 bump。本 repo 的版本記在各 skill 的 README，不另立 plugin 層版本。
-- **不設 `strict`（留預設 `true`）**：官方文件與 schemastore 對這個欄位的描述不一致——前者說「`plugin.json` 為權威，marketplace entry 可補充、兩者合併，manifest 本身可省略」，後者說「要求 plugin 目錄必須有 manifest」。本 repo 沒有 `.claude-plugin/plugin.json`，實測預設值下 4 個 skill 全數載入，以實作行為為準。
+- **每個 plugin 目錄自帶 `plugin.json`**：讓 agy 可以用 `agy plugin install` 單獨安裝（本機 `./plugins/<name>` 或 GitHub 子目錄 URL）——舊佈局做不到，當時 agy 只認 repo 根目錄那份，一裝就是全部。
+- **不設 `version`**：省略時 Claude 以 git commit SHA 判定更新、Codex 一律顯示 `local`，兩家都是 push 完使用者 `update` 就拿得到；設了則會釘住版本字串，每次發布都要記得 bump。本 repo 的版本記在各 skill 的 README，不另立 plugin 層版本。
+- **不設 `strict`（留預設 `true`）**：官方文件與 schemastore 對這個欄位的描述不一致——前者說「`plugin.json` 為權威，marketplace entry 可補充、兩者合併，manifest 本身可省略」，後者說「要求 plugin 目錄必須有 manifest」。本 repo 沒有 `.claude-plugin/plugin.json`，實測預設值下 skill 全數載入，以實作行為為準。
   > **DECISION**：曾評估寫成 `strict: false`（語意上更貼近「entry 即完整定義」），實測也可用，但 `false` 的代價是——日後若有人在 repo 補上 `.claude-plugin/plugin.json` 且其中宣告了元件，會直接判定衝突、plugin 載入失敗。相較之下留預設只在「Claude Code 改採 schemastore 那套描述」時才會出事，機率低得多，故不寫。
 - **不必為 Codex 另備 manifest**：Codex 的 plugin manifest 位置是 `.codex-plugin/plugin.json`，但缺少時它會依 marketplace entry 自動生成一份放進快取（`~/.codex/plugins/cache/<marketplace>/<plugin>/`），無需在 repo 內自備。
 
-### opencode 的跨 agent 重複
+### 共用目錄的同名衝突
 
-opencode 的全域 skills 來源有三處：`~/.config/opencode/skills/`、`~/.claude/skills/`、`~/.agents/skills/`（專案內另看 `.opencode/`、`.claude/`、`.agents/` 下的 `skills/`）。**它會吃到 claude 目錄下的東西**，是唯一的跨 agent 重複來源。
+opencode 的全域 skills 來源有三處：`~/.config/opencode/skills/`、`~/.claude/skills/`、`~/.agents/skills/`（專案內另看 `.opencode/`、`.claude/`、`.agents/` 下的 `skills/`）。同名 skill 只載入一份，`~/.config/opencode/skills/` 優先，另外兩處的會被遮蔽。
 
-因此 `install opencode` 前多一道守衛：偵測 `~/.claude/skills/`、`~/.agents/skills/` 是否已有本 repo 的 skill，有就中止——那批 skill 早就載入了，再裝一次只會重複。`FORCE=1` 可略過並留下警告。點名 opencode 時擋下並回 rc=1；被全體掃到時只印略過、不計失敗。
+codex 除自己的 `skills/` 外也掃 `~/.agents/skills/`，同名時與 plugin 版**並存**（plugin 版名為 `<plugin>:<skill>`）。
 
-`status` 也因此多一列 `共用／已掃到`，標出它實際從哪些別人的目錄載到 skill。
+本工具不會裝到這些共用目錄，那裡的同名 skill 只可能是手動放的或別的工具裝的，所以**只提醒、不擋也不刪**：opencode 裝了就以自己的目錄為準；codex 會兩份都載入，`install` 時印一行 `[注意]`。`remove` 後若共用目錄仍有同名，兩家都印 `[注意]`。只看這些全域目錄，不含專案級目錄與設定檔 `skills` 指到的位置。
+
+`status` 會多一列 `共用／已掃到`，標出它實際從哪些共用目錄載到 skill。
 
 ## 互動矩陣
 
@@ -122,17 +124,17 @@ install（差異更新）
 
 ## 遺留偵測
 
-每個 agent 只走一種方式，但**另一種機制的殘留**仍可能存在——舊版工具裝的、手動複製的、從別處裝的。各家都會同時載入 plugin 與自己的 skills 目錄，殘留即重複載入。
+每個 agent 只走一種方式，但**另一種機制的殘留**仍可能存在——舊版工具裝的、手動複製的、從別處裝的。各家都會同時載入 plugin 與自己的 skills 目錄，殘留即重複載入（agy 1.5.15 實測：plugin 與 `~/.gemini/skills/` 的同名 skill 兩份都列出，且顯示同名）。
 
 - **`install` 前偵測並擋下**：
 
   ```
   ✗ claude：/home/mars/.claude/skills 已有本 repo 的 skill，中止以免重複載入
-      remove 會把兩種機制一起清掉：tools/skills.sh remove claude
+      remove 會把殘留一起清掉：tools/skills.sh remove claude
       或確定要並存：FORCE=1 ...
   ```
 
-- **`remove` 一律兩邊都清**：marketplace 模式的 agent 連 skills 目錄裡的副本一起刪，agy 連殘留的 plugin 安裝一起移除。
+- **`remove` 一律兩邊都清**：claude／codex／agy 連自己 skills 目錄裡的副本一起刪，互動矩陣也會列出；共用目錄除外，見〈共用目錄的同名衝突〉。
 - **`status` 只在真的有東西時才多印一列** `⚠遺留`：正常情況每個 agent 只有一列，出問題時才看得見。
 
 ## 用法
@@ -158,15 +160,15 @@ tools/skills.sh <install|remove|update|status|validate> [claude|codex|agy|openco
 
 | 變數 | 預設 | 說明 |
 |------|------|------|
-| `SKILLS` | 互動選單 | 只處理指定的 skill（空白分隔），略過選單；名稱拼錯回 rc=2。只影響 `install`／`remove`（以及 claude 與 copy 模式的逐項 `update`）——codex 的 `update` 只能整份刷新 marketplace 快照，沒有單一 plugin 的更新能力 |
-| `SOURCE` | manifest 的 `repository` | 覆寫 marketplace 來源；開發時用 `SOURCE=$PWD` 裝工作目錄的內容 |
+| `SKILLS` | 互動選單 | 只處理指定的 skill（空白分隔），略過選單；名稱拼錯回 rc=2。只影響 `install`／`remove`（以及 claude、agy 與 copy 模式的逐項 `update`）——codex 的 Git 來源 `update` 例外，`marketplace upgrade` 會整份刷新，連已安裝的快取一起 |
+| `SOURCE` | manifest 的 `repository` | 覆寫 marketplace／plugin 來源；開發時用 `SOURCE=$PWD` 裝工作目錄的內容。agy 不記錄來源，用 `SOURCE` 裝的要帶同樣的 `SOURCE` 才會從同一處更新 |
 | `FORCE` | 空 | `1` ＝略過遺留偵測 |
 
-沒有 `METHOD`——每個 agent 只有一種方式。`SOURCE` 只對 claude／codex 有意義，agy／opencode 走 copy，來源恆為 repo 本身。
+沒有 `METHOD`——每個 agent 只有一種方式。`SOURCE` 對 claude／codex／agy 有意義；opencode 走 copy，來源恆為 repo 本身。
 
 ## `status` 的狀態碼
 
-copy 方式逐 skill 標示：
+plugin 與 copy 方式逐 skill 標示，比對對象是工作目錄：
 
 | 碼 | 意義 |
 |----|------|
@@ -174,6 +176,7 @@ copy 方式逐 skill 標示：
 | `≠有差異` | 實體目錄，與 repo 不同 |
 | `→<目標>` | symlink，附指向 |
 | `✗斷鏈` | symlink 指向不存在的目標 |
+| `✗缺檔` | agy 登記為已安裝，但檔案不在 |
 | 不列出 | 未安裝 |
 
 ## 行為約定
@@ -183,8 +186,8 @@ copy 方式逐 skill 標示：
 - **copy 模式不寫穿 symlink**：目的地若是 symlink 就略過並報錯——直接 `rsync` 會穿透寫進連結目標（多半是另一個 agent 的副本）。
 - **copy 模式只動 repo 有的名稱**：第三方 skill 一律不碰。刪除前另有路徑守衛（兩段路徑非空、basename 須等於 skill 名），避免變數為空時 `rm -rf` 退化成刪整個 skills 目錄。
 - **`remove` 在本 repo 的 plugin 全數移除後才註銷 marketplace**：只移除其中幾個時會保留註冊，否則其餘還裝著的 plugin 會一起失效。若仍有已下架的舊 plugin 裝著也會保留——實測 `claude plugin marketplace remove` 會連帶移除該 marketplace 底下已安裝的 plugin。
-- **`remove` 是冪等的**：claude／codex 對「移除不存在的東西」都回非零，故一律先判斷是否真的裝了；agy 的 uninstall 本身即冪等。乾淨環境跑 `remove` 回 0，不該報錯。
-- **`update` 對本機註冊的 codex marketplace 會略過**：判準取自 codex 自己的 `marketplace list --json`（`sourceType`），不是本次的 `SOURCE`——兩者可能不一致（用 `SOURCE=$PWD` 裝好後直接跑 `update`，預設來源是 GitHub）。以 SOURCE 判斷會誤跑 `upgrade`，換來一個「is not configured as a Git marketplace」的誤報失敗。
+- **`remove` 是冪等的**：claude 對「移除不存在的東西」回非零、codex 與 agy 回 0，故一律先判斷是否真的裝了。乾淨環境跑 `remove` 回 0，不該報錯。
+- **`update` 對 codex 分來源處理**：Git 來源跑 `marketplace upgrade`；本機來源不能 upgrade，改為逐一重跑 `plugin add` 覆蓋快取，已停用的略過（`plugin add` 會重新啟用它）。判準取自 codex 自己的 `marketplace list --json`（`sourceType`），不是本次的 `SOURCE`——兩者可能不一致（用 `SOURCE=$PWD` 裝好後直接跑 `update`，預設來源是 GitHub）。以 SOURCE 判斷會誤跑 `upgrade`，換來一個「is not configured as a Git marketplace」的誤報失敗。
 - **名稱不寫死**：marketplace 名與 plugin 名一律用 `jq` 從 `marketplace.json` 讀取，改名只需改 manifest。
 
 ## 安裝後自檢
@@ -211,13 +214,15 @@ copy 方式逐 skill 標示：
 | 乾淨環境 `remove` | rc=0，四家全印略過、無 ✗（冪等） |
 | `install` | 四家全 ✔，rc=0 |
 | `status`（乾淨） | 每個 agent 各一列，無遺留列 |
-| `status`（製造遺留） | claude 多 `copy ⚠遺留`、agy 多 `plugin ⚠遺留`、opencode 多 `共用 已掃到` |
-| `remove`（有遺留） | 連 claude 的 copy 副本與 agy 的殘留 plugin 一起清，rc=0 |
+| `status`（製造遺留） | claude、codex 與 agy 多 `copy ⚠遺留`、opencode 多 `共用 已掃到` |
+| `remove`（有遺留） | 連 claude、codex 與 agy 的 copy 副本一起清，rc=0；第三方 skill 不動 |
 | 連續 `remove` | 第二次仍 rc=0 |
 | 遺留擋下 `install claude` | rc=1 並給出 remove／FORCE 兩條出路 |
 | `FORCE=1` | 放行並留警告 |
-| `install opencode`（claude 目錄有東西） | 跨 agent 守衛擋下，rc=1 |
-| `update` | rc=0；codex 未註冊時正確略過 |
+| `install opencode`（共用目錄有同名 skill） | 照裝，以自己的目錄為準，rc=0 |
+| `install codex`（`~/.agents/skills` 有同名 skill） | 全部照裝、印 `[注意]`，rc=0；`remove` 不刪該處、印 `[注意]` |
+| 點名的 agent 沒裝 CLI | 略過、rc=0，不跑安裝後自檢 |
+| `update` | rc=0；codex 未註冊時正確略過，本機來源會覆蓋快取；agy／opencode 只更新已安裝的 |
 | 未知 agent／子命令／skill 名 | rc=2 |
 | 二維矩陣（以 PTY 實測） | 起始狀態正確反映現況；`a`／`r`／`c` 在「有未勾」時皆為先全勾；同一 agent 增減並存正確；還原／取消／確定三鈕皆正確（取消後狀態未變） |
 | 編號輸入版（`TERM=dumb`） | 正確退回，空白與逗號分隔、越界與非數字重問皆正確 |
@@ -226,10 +231,10 @@ copy 方式逐 skill 標示：
 其他：
 
 - **`make validate`**：另跑 `claude plugin validate --strict` 與逐 plugin 的 `agy plugin validate`，全過。另實測「`plugins/<name>/` 缺 `skills/<name>/SKILL.md`」會正確擋下並回 rc=1。
-- **新佈局**：三家實測 `source: "./plugins/<name>"` 皆可載入（claude `Skills (1)`、codex 執行期看得到、agy `components: ["skills"]`）；快取由 508K 降為 56–72K。另實測「skills/ 下有目錄缺 SKILL.md」與「entry 路徑指向非 skill 目錄」皆正確擋下並回 rc=1。
-- **manifest 本身**：`.claude-plugin/marketplace.json` 以官方 JSON Schema（`json.schemastore.org/claude-code-marketplace.json`）驗證無誤，`claude plugin validate --strict` 亦通過；Claude Code 實裝後 `claude plugin details` 列出 4 個 skill，Codex 移除並重加 marketplace 後仍正常解析。
-- **agy 的 skills 目錄**：以兩個標記 skill 分別放進 `~/.gemini/skills` 與 `~/.gemini/antigravity-cli/skills`，再問 agy 看得到哪些——**兩處都載得到**。本工具用前者。
+- **新佈局**：實測 `source: "./plugins/<name>"` 可用（claude `Skills (1)`、codex 執行期看得到；agy 1.5.15 執行期看得到）；快取由 508K 降為 56–72K。另實測「skills/ 下有目錄缺 SKILL.md」與「entry 路徑指向非 skill 目錄」皆正確擋下並回 rc=1。
+- **manifest 本身**：`.claude-plugin/marketplace.json` 以官方 JSON Schema（`json.schemastore.org/claude-code-marketplace.json`）驗證無誤，`claude plugin validate --strict` 亦通過；Claude Code 實裝後 `claude plugin details` 每個 plugin 列出 1 個 skill，Codex 移除並重加 marketplace 後仍正常解析。
+- **agy 的 skills 目錄**：以兩個標記 skill 分別放進 `~/.gemini/skills` 與 `~/.gemini/antigravity-cli/skills`，再問 agy 看得到哪些——**兩處都載得到**。本工具只用前者偵測與清除殘留副本。
 
-> agy 的 `plugin validate` 只認**根目錄**的 `plugin.json`，對只有 `.claude-plugin/plugin.json` 的 repo（例如 mattpocock/skills）會回報 `missing plugin.json`。這是 agy 的結構要求，不是 manifest 有問題。
+> agy 的 `plugin validate` 認 plugin 根目錄、`.antigravity-plugin/` 或 `.gemini-plugin/` 內的 `plugin.json`（1.5.15 實測），對只有 `.claude-plugin/plugin.json` 的 repo（例如 mattpocock/skills）會回報 `missing plugin.json`。這是 agy 的結構要求，不是 manifest 有問題。
 >
-> **GitHub 來源尚未實裝成功**：`.claude-plugin/`、`plugin.json`、`tools/`、`Makefile` 目前都還沒進 main，從 GitHub 裝會拿到 `marketplace root does not contain a supported manifest`（codex）／`Marketplace file not found`（claude）。兩家的 clone 本身都成功，代表來源形式沒問題，缺的只是 push。這批進 main 後需重跑一次 `install` 驗證。
+> GitHub 來源：claude、codex、agy 三家都已在無登入憑證的隔離環境實裝成功。

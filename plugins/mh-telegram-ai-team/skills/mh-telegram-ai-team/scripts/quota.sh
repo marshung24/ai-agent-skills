@@ -45,20 +45,27 @@ quota_claude() {
 }
 
 # quota_codex：stdout 印窗口 JSON 陣列，失敗回非 0
-# app-server 的 JSON-RPC account/rateLimits/read；stdin EOF 時 server 會在回應前結束，故用 coproc 保持連線
+# app-server 的 JSON-RPC account/rateLimits/read；stdin EOF 時 server 會在回應前結束，故用 FIFO 保持連線
+# DECISION: 未採 coproc，因 macOS 內建 bash 3.2 不支援
 quota_codex() {
-  local line resp="" pid
-  coproc CODEX { "$TIMEOUT_BIN" --kill-after=5s "$TIMEOUT" codex app-server 2>/dev/null; }
-  pid=$CODEX_PID
-  printf '%s\n' \
+  local line resp="" pid dir
+  dir="$(mktemp -d)" || return 1
+  mkfifo "$dir/in" "$dir/out" || { rm -rf "$dir"; return 1; }
+  "$TIMEOUT_BIN" --kill-after=5s "$TIMEOUT" codex app-server <"$dir/in" >"$dir/out" 2>/dev/null &
+  pid=$!
+  # 兩端依序開啟才不互等；開啟後即可刪檔，連線不受影響
+  exec 3>"$dir/in" 4<"$dir/out"
+  rm -rf "$dir"
+  # server 提早結束時 SIGPIPE 只結束子 shell，不中斷查詢流程
+  ( printf '%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"mh_telegram_ai_team","title":"mh-telegram-ai-team","version":"1"}}}' \
     '{"jsonrpc":"2.0","method":"initialized","params":{}}' \
-    '{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":{}}' >&"${CODEX[1]}"
+    '{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":{}}' >&3 ) 2>/dev/null
   # 以 JSON 的 .id 認回應（通知不帶 id）；收到即關 stdin 讓 server 自行結束
-  while IFS= read -r line <&"${CODEX[0]}"; do
+  while IFS= read -r line <&4; do
     if jq -e 'type == "object" and .id == 2' >/dev/null 2>&1 <<<"$line"; then resp="$line"; break; fi
   done
-  exec {CODEX[1]}>&- 2>/dev/null
+  exec 3>&- 4<&-
   wait "$pid" 2>/dev/null
   [ -n "$resp" ] || return 1
   # usedPercent 驗 0–100 再換算；windowDurationMins 300／10080 即 5 小時窗／7 天窗，resetsAt 為 epoch 秒

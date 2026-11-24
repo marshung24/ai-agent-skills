@@ -1,6 +1,6 @@
 # Marketplace 設定指南
 
-> **版本**：2.1.1｜**更新日期**：2026-08-12
+> **版本**：2.2.0｜**更新日期**：2026-11-24
 
 本 repo 如何同時作為 Claude Code／Codex 的 plugin marketplace 發佈，以及各家 agent 的行為差異。所有結論皆為實測所得，升版需重驗。
 
@@ -15,7 +15,7 @@
 | **manifest** | `.claude-plugin/marketplace.json`（Claude Code 與 Codex 共用同一份） |
 | **粒度** | 一個 skill ＝ 一個 plugin |
 | **佈局** | `plugins/<name>/skills/<name>/SKILL.md`，`source` 指向 `./plugins/<name>` |
-| **哪幾家吃 marketplace** | 只有 Claude Code 與 Codex；agy 與 opencode 走複製 |
+| **哪幾家吃 marketplace** | 只有 Claude Code 與 Codex；agy 走 plugin，opencode 走複製 |
 | **驗證** | `make validate`（七項，含 `claude plugin validate --strict`） |
 
 ---
@@ -25,13 +25,13 @@
 | Agent | 有 marketplace？ | 讀哪份 manifest | 本 repo 採用 |
 |-------|-----------------|----------------|-------------|
 | Claude Code | ✅ 完整 | `.claude-plugin/marketplace.json` | marketplace |
-| Codex CLI | ✅ 沿用 Claude 格式 | 同上（另接受 `agents/plugins/api_marketplace.json`） | marketplace |
-| Antigravity（agy） | ⚠️ 來源註冊在 CLI 內部 | 根目錄 `plugin.json` | copy |
-| opencode | ❌ 無 | — | copy |
+| Codex CLI | ✅ 沿用 Claude 格式 | 同上（另接受 `.agents/plugins/` 下的 `marketplace.json`、`api_marketplace.json`） | marketplace |
+| Antigravity（agy） | ⚠️ 只有官方的 | 根目錄 `plugin.json` | plugin |
+| opencode | ❌ 官方文件未見 | — | copy |
 
-**agy 的 ⚠️**：它的 binary 內含 marketplace 來源註冊表（install handler／link generator），`plugin install` 也接受 `plugin@marketplace`，但第三方**無法用 manifest 發佈自己的 catalog**。加上它只收本機目錄、不吃 Git URL，走 plugin 換不到複製沒有的好處，因此本 repo 對它只走複製。
+**agy 的 ⚠️**：`plugin@marketplace` 目前只認官方的 `antigravity-plugins-official`（[官方說明](https://antigravity.google/docs/marketplace?tab=cli)），第三方不能註冊自己的 marketplace。但 `agy plugin install` 可直接吃 GitHub URL，接 `/tree/main/plugins/<name>` 就只裝一個。更新靠重跑 install，沒有 `plugin update`。本 repo 的安裝工具就是這樣裝；來源與分支的細節讀 [tools/README.md](../tools/README.md)〈安裝方式〉。
 
-**opencode 的 ❌**：它的 plugin 是 JS/TS 模組（掛 hook、加 tool），不承載 skills。skills 一律靠目錄掃描。
+**opencode 的 ❌**：它的 plugin 是 JS/TS 套件（從 npm 或 Git 安裝），不吃本 repo 的 manifest。skills 靠目錄掃描，或由設定檔的 `skills` 指向本機目錄或 HTTP 目錄。後者要自備 `index.json`，所以本 repo 現有的 GitHub repo／tree／raw 目錄不能直接當來源；1.18.30 實測下載後腳本會失去執行權限，且 `version` 不變就不更新。[官方 Skills 文件](https://opencode.ai/docs/skills/)有格式與同名優先序，要改走 HTTP 時讀它。
 
 ---
 
@@ -104,7 +104,8 @@ manifest 只要指到 plugin 目錄，不需要 `skills` 欄位——plugin root
 每個 plugin 目錄自帶 `plugin.json` 後，agy 可以單獨安裝某一個 skill：
 
 ```bash
-agy plugin install ./plugins/mh-code-review    # components: ["skills"]，1 processed
+agy plugin install ./plugins/mh-code-review
+agy plugin install https://github.com/marshung24/ai-agent-skills/tree/main/plugins/mh-code-review
 ```
 
 這是舊佈局做不到的——當時 agy 只認 repo 根目錄那一份 `plugin.json`，一裝就是全部。
@@ -126,17 +127,9 @@ Codex 的預設掃描只認 `<plugin root>/skills/<name>/SKILL.md` 這個形狀�
 
 ### 不設 `version`
 
-省略時 Claude Code 以 **git commit SHA** 當版本，push 完使用者 `update` 就拿得到。設了則會釘住該字串，每次發布都要記得 bump，忘記就等於停止發佈。
+省略時 Claude Code 對 Git 來源以 **git commit SHA** 當版本，push 完使用者 `update` 就拿得到。設了則會釘住該字串，每次發布都要記得 bump，忘記就等於停止發佈。
 
-實測（`SOURCE=$PWD`、只改工作區不 commit）：
-
-```
-✔ <marketplace> is already at the latest version (61e2d14ce042).   ← 沒更新
-# commit 之後
-✔ Plugin updated from 61e2d14ce042 to 759b7269d5d8. Restart to apply changes.
-```
-
-**開發時要注意**：Claude Code 比的是 commit SHA，未 commit 的改動不會生效。Codex 對本機來源的判準不同（VERSION 欄是 `local`），重跑 `plugin add` 就會覆蓋快取，不必 commit。
+**開發時要注意**（`SOURCE=$PWD`）：Claude Code 直接讀工作目錄，未 commit 的改動在下次 session 或 `/reload-plugins` 生效，不必 update。Codex 讀的是安裝時的快取（VERSION 欄是 `local`），要重跑 `plugin add`（`make update` 會代做）才會覆蓋，同樣不必 commit。
 
 ### 不設 `strict`
 
@@ -153,7 +146,7 @@ Codex 的預設掃描只認 `<plugin root>/skills/<name>/SKILL.md` 這個形狀�
 
 ### 用 HTTPS URL 而非 `owner/repo` 簡寫
 
-`owner/repo` 簡寫在 Claude Code **預設走 SSH clone**，沒有 SSH 金鑰的使用者會直接失敗（需另設 `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`）。完整 HTTPS URL 兩家都收，也不依賴使用者的 SSH 設定，因此 README 與工具一律用它。
+`owner/repo` 簡寫在 Claude Code 會先試 SSH、不通才改 HTTPS，走哪條隨使用者的 SSH 設定而變（設 `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` 可固定走 HTTPS）。完整 HTTPS URL 兩家都收，行為固定，因此 README 與工具一律用它。
 
 ---
 
@@ -163,7 +156,7 @@ Codex 的預設掃描只認 `<plugin root>/skills/<name>/SKILL.md` 這個形狀�
 
 | | 移除 entry 後 |
 |---|---|
-| **Claude Code** | 支援 `renames`。`plugin list` 仍列出，但標註 `Note: Removed from the "<marketplace>" marketplace`；`plugin details` 查不到；`plugin uninstall` 可正常移除 |
+| **Claude Code** | 支援 `renames`。`plugin list` 仍列出；本機來源實測 Version 變 `unknown`、沒有 Removed 提示，Git 來源未驗證；`plugin uninstall` 可正常移除 |
 | **Codex** | **不認識 `renames`**。`plugin list` 直接看不到它，但 `config.toml` 仍有 `enabled = true`、快取還在，**執行期照樣載入全部 skill**。`plugin remove` 仍可移除 |
 
 所以下架一個 entry 時，manifest 要同時補上：
@@ -172,7 +165,7 @@ Codex 的預設掃描只認 `<plugin root>/skills/<name>/SKILL.md` 這個形狀�
 "renames": { "<舊 plugin 名>": null }
 ```
 
-`null` 表示該 plugin 已移除。Claude Code 會據此給提示；Codex 忽略這個未知欄位（實測不影響解析）。目前沒有需要追蹤的下架 plugin，故 manifest 不寫這個欄位。
+`null` 表示該 plugin 已移除。Claude Code 認得這個欄位（提示與否見上表）；Codex 忽略這個未知欄位（實測不影響解析）。目前沒有需要追蹤的下架 plugin，故 manifest 不寫這個欄位。
 
 `tools/skills.sh` 也以此為單一事實來源：從 `renames` 的 key 取得「已下架但可能還裝著」的名單（沒有這個欄位時名單為空，偵測整段略過），並且
 
@@ -196,7 +189,7 @@ make validate
 | entry 的 `source` 指向存在的目錄 | 打錯路徑不會報錯，只會裝到空的 plugin |
 | 每個 skill 都有 entry | 新增 skill 卻沒發佈，使用者裝不到 |
 | `claude plugin validate --strict` | 官方驗證器，權威性高於上面的欄位檢查；`--strict` 連拼錯的欄位名也會擋 |
-| `agy plugin validate` | 驗根目錄 plugin.json |
+| `agy plugin validate` | 驗各 plugin 目錄的 plugin.json |
 
 另可用官方 JSON Schema 驗證（本 repo 目前 0 錯）：
 
@@ -233,7 +226,7 @@ python3 -c "import json,jsonschema;jsonschema.Draft202012Validator(json.load(ope
 | skill 清單 | `plugins/*/` 底下有 `skills/<name>/SKILL.md` 者 |
 | 選單裡的描述 | 各 entry 的 `.description` |
 
-所以**改 manifest 就等於改工具行為**，不需要同步改腳本。`install` 與 `remove` 會跳兩段選單（先挑 agent、再挑 skill），`update` 則一律全做。
+所以**改 manifest 就等於改工具行為**，不需要同步改腳本。`install` 與 `remove` 會跳 agent × skill 矩陣（終端畫不下時退回只挑 skill 的選單），`update` 不跳選單、只更新已安裝的。
 
 ## 相關文件
 

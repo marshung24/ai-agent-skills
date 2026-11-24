@@ -185,26 +185,26 @@ Skill 的 description 是 Agent 選擇是否啟動的依據。寫得太寬會誤
 1. **誤觸發風險上升**：多個 skill 的 description 可能互相重疊，Agent 選錯 skill 的機率增加
 2. **Token 成本上升**：Agent 需要在每次對話開始時載入所有 skill 的 metadata（name + description），skill 越多，固定 overhead 越大
 
-#### 應對策略：Skill vs Slash Command
+#### 應對策略：自動觸發 vs 手動觸發
 
-不是所有能力都適合做成 skill（自動觸發）。依使用頻率與觸發精準度，選擇合適的實現方式：
+不是所有能力都適合自動觸發。依使用頻率與觸發精準度選擇觸發方式。Claude Code 已把自訂 command 併入 skill，兩者預設都可能被自動呼叫，要限手動就在 frontmatter 設 `disable-model-invocation: true`（其他 agent 依其文件）：
 
-| 面向 | Skill（自動觸發） | Slash Command（手動觸發） |
+| 面向 | 自動觸發 | 手動觸發 |
 |------|-------------------|--------------------------|
-| 觸發方式 | Agent 依 description 自動判斷 | 使用者手動輸入 `/command` |
+| 觸發方式 | Agent 依 description 自動判斷 | 使用者手動輸入 `/name` |
 | 適合場景 | 高頻、觸發條件明確、不易與其他 skill 混淆 | 低頻、觸發條件模糊、或與其他 skill 容易混淆 |
 | 誤觸發風險 | 有（description 重疊時） | 無（使用者主動選擇） |
 | Token 成本 | 每次對話都載入 metadata | 僅在呼叫時載入 |
-| 使用門檻 | 低（自然語言觸發） | 中（需知道 command 名稱） |
+| 使用門檻 | 低（自然語言觸發） | 中（需知道 skill 名稱） |
 
 **建議決策流程**：
 
-1. 這個能力的使用頻率高嗎？ → 低頻考慮 slash command
-2. 觸發條件是否明確、不易與其他 skill 混淆？ → 容易混淆考慮 slash command
-3. 安裝的 skill 總數是否已經偏多（> 10 個）？ → 邊緣的 skill 考慮改為 slash command
-4. 使用者是否已經習慣用特定指令呼叫？ → 習慣已養成就維持 slash command
+1. 這個能力的使用頻率高嗎？ → 低頻考慮手動觸發
+2. 觸發條件是否明確、不易與其他 skill 混淆？ → 容易混淆考慮手動觸發
+3. 安裝的 skill 總數是否已經偏多（> 10 個）？ → 邊緣的 skill 考慮改為手動觸發
+4. 使用者是否已經習慣用特定指令呼叫？ → 習慣已養成就維持手動觸發
 
-> 一般建議：核心高頻 skill 維持自動觸發；低頻、專用、或容易誤觸發的能力改為 slash command，減少 description 競爭與 token 浪費。
+> 一般建議：核心高頻 skill 維持自動觸發；低頻、專用、或容易誤觸發的能力改為手動觸發，減少 description 競爭與 token 浪費。
 
 ---
 

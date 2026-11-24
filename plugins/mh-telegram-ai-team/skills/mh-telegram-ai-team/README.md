@@ -32,6 +32,7 @@
 
 - 要改需求、評估架構或選型、想知道規則為什麼存在 → [docs/design.md](docs/design.md)
 - 要查 Telegram 平台限制、橋接層內部行為、多人部署考量 → [docs/platforms.md](docs/platforms.md)
+- 評估群組要不要啟用話題、排查話題內誤觸發或回錯位置 → [docs/topics.md](docs/topics.md)（離線模擬，未在真實群組實測）
 - 評估改用或並用 Discord → [docs/discord.md](docs/discord.md)（未實作、未實測）
 - 在真實群組驗收本 skill → [docs/test-cases.md](docs/test-cases.md)
 

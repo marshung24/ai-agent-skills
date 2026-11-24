@@ -2,7 +2,7 @@
 
 > **版本**：0.1.1｜**更新日期**：2026-11-24
 
-用 Telegram 建立 AI 協作團隊：協助建置 bot 與 Claude Code／Codex 串接，並提供協作規範、通訊流程與訊息模版。
+用 Telegram 建立 AI 協作團隊：協助建置 bot 與 Claude Code 串接，並提供協作規範、通訊流程與訊息模版。
 
 - 目前只支援 Claude Code＋Telegram：Claude Code 端（官方 plugin＋claude-telegram-supercharged）依實測整理；Codex 端（Codex-tg-Bridge）僅文件調查、未實測，不列為支援
 - 各 CLI 與 plugin 行為會隨版本變動，套用前以安裝版本的 README 為準

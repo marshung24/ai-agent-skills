@@ -12,7 +12,7 @@
 | 代號 | 來源 |
 |---|---|
 | S | [SKILL.md](../SKILL.md)：觸發守門、架構前提、不變式 |
-| C | [references/collaboration.md](../references/collaboration.md)：協作與發送規則 |
+| C | [references/collaboration.md](../references/collaboration.md)：協作與發送規則；情境流程在 [references/collaboration-flows.md](../references/collaboration-flows.md) |
 | B | [references/setup.md](../references/setup.md)：建置、驗證與排查 |
 | AI／AE | [registry-internal.md](../assets/registry-internal.md)／[registry-external.md](../assets/registry-external.md)：登錄欄位與寫入邊界 |
 | U | 原始需求筆記的〈測試方法〉〈各 TC 的安全面〉〈安全風險與繞過途徑〉（已併入本檔；需求本身見 [design.md](design.md)） |

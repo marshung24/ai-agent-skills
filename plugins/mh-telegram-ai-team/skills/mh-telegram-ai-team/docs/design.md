@@ -4,7 +4,7 @@
 > 資料日期 2026-11-12（官方文件查證；Claude Code 端已實測，Codex 端與 Discord 未實測）。
 >
 > 單一事實來源分工（本檔不重複）：
-> - 執行規則（分級、授權、訊息契約、情境流程）→ [references/collaboration.md](../references/collaboration.md)、[SKILL.md](../SKILL.md)〈不變式〉
+> - 執行規則（分級、授權、訊息契約）→ [references/collaboration.md](../references/collaboration.md)；情境流程 → [references/collaboration-flows.md](../references/collaboration-flows.md)；[SKILL.md](../SKILL.md)〈不變式〉
 > - 建置、排查、驗證步驟 → [references/setup.md](../references/setup.md)
 > - 平台與橋接層的調查、內部行為、多人部署 → [platforms.md](platforms.md)；Discord → [discord.md](discord.md)
 > - 驗收 → [test-cases.md](test-cases.md)

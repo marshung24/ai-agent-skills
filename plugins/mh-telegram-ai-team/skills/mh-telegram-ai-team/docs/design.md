@@ -4,8 +4,9 @@
 > 資料日期 2026-11-12（官方文件查證；Claude Code 端已實測，Codex 端與 Discord 未實測）。
 >
 > 單一事實來源分工（本檔不重複）：
-> - 執行規則（分級、授權、訊息契約、情境流程）→ [references/collaboration.md](../references/collaboration.md)、[SKILL.md](../SKILL.md)〈不變式〉
+> - 執行規則（分級、授權、訊息契約）→ [references/collaboration.md](../references/collaboration.md)；情境流程 → [references/collaboration-flows.md](../references/collaboration-flows.md)；[SKILL.md](../SKILL.md)〈不變式〉
 > - 建置、排查、驗證步驟 → [references/setup.md](../references/setup.md)
+> - 討論 `backlog/issues/` 的分類與揭露繼承（草稿、未啟用）→ [backlog-issues-draft.md](backlog-issues-draft.md)
 > - 平台與橋接層的調查、內部行為、多人部署 → [platforms.md](platforms.md)；Discord → [discord.md](discord.md)
 > - 驗收 → [test-cases.md](test-cases.md)
 
@@ -60,6 +61,7 @@ IM 群組／私訊
 | 自我解鎖：經 IM 改存取設定、skill、登錄檔 | 存取異動只在終端機；建議最後加工具權限拒寫，未設者只有軟限制 | SKILL.md〈不變式〉；setup.md〈拒寫設定〉 |
 | 對話迴圈與洪水：bot 互相觸發、引用帶出觸發字、`@all` 連鎖 | 定向觸發、往返上限、限速、正文不帶 @ | collaboration.md〈訊息契約〉〈互動規則〉；`access.json` `limits` |
 | 跨聊天室外洩 | 查歷史限定觸發的聊天室，不信任傳入的聊天室 ID | SKILL.md〈不變式〉；工具層未強制，見 platforms.md |
+| 內部資訊探詢：以唯讀提問或任務確認套出規則、路徑、工具與檔案狀態 | 不分身分限制可揭露的資訊，負責人同意也不解禁；屬軟限制 | collaboration.md〈揭露邊界〉 |
 | 憑證外洩 | token 只放橋接層設定檔（600），不進 git、不 export 全域；建置時以一次整體授權告知風險，碰到時只警告；接觸過者收尾清 session 並重設 | SKILL.md〈不變式〉；setup.md〈流程總覽〉〈瀏覽器協作〉 |
 | 負責人帳號被入侵，冒用核准權 | 必要設定完成後評估帳號安全，改善由負責人做 | setup.md〈帳號安全評估〉 |
 

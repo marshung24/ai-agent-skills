@@ -37,9 +37,9 @@
 | 3.4 | 加入群組權限 | AI | 允許；寫 token 後以腳本複核 | 否 | 已關 → 直接開；改不了 → ⚠️ |
 | 3.5 | Bot-to-Bot | AI | 開啟（本 skill 選定值；群組互通至少一方要開） | 否 | 進不了 iframe → 請使用者手動；找不到 → ⚠️ |
 | 4.1 | 祕書目錄 | AI | `~/secretary`（本 skill 選定值），非 git repo；含 `data/backlog/requests/` | 否 | 在 repo 內 → 問替代路徑 |
-| 4.2 | 指令檔與執行期授權 | AI | `AGENTS.md`＝collaboration.md〈登錄檔〉的載入規則（須含 `data/` 宣告）＋assets/agents-policy.md 三段；`CLAUDE.md` 一行 `@AGENTS.md`；未知授權寫「未設定」 | 否 | 寫不進 → ⚠️ 並給內容請使用者貼 |
+| 4.2 | 指令檔與執行期授權 | AI | `AGENTS.md`＝〈祕書目錄〉「指令檔載入規則」（須含 `data/` 宣告）＋assets/agents-policy.md 三段；`CLAUDE.md` 一行 `@AGENTS.md`；未知授權寫「未設定」 | 否 | 寫不進 → ⚠️ 並給內容請使用者貼 |
 | 4.3 | alias | AI | `claude-tg`（本 skill 選定值），不帶跳過權限的旗標 | 否 | 已有同名且內容不同 → 不覆蓋，問 |
-| 4.4 | 交接檔 | AI | `HANDOFF.md` 含本表、各項狀態與已改的值，不含 token 與 ID | 否 | — |
+| 4.4 | 交接檔 | AI | `HANDOFF.md` 內容依〈祕書目錄〉「交接」，不含 token 與 ID | 否 | — |
 | 5.1 | 前置工具 | AI | `bun` 必要；`git`、`jq`、`curl` 供安裝與檢查；缺的依 1.2 直接補裝 | 否 | `bun` 裝不了 → 擋 5.2 起；其餘 → ⚠️ 未檢查 |
 | 5.2 | 官方 plugin | AI | 已安裝 | 否 | 失敗 → 擋相依項，依〈排查〉 |
 | 5.3 | 強化版 | AI | 1.2 已同意，已套用 | 否 | 失敗或不同意 → 明示本 skill 必要能力未就緒，擋相依項 |
@@ -55,8 +55,8 @@
 | 9.2 | 執行紀錄 | — | 不掛（前提未實測） | 否 | ⏭️ |
 | 9.3 | 工作區盤點 | — | 不做，負責人日後要求才做 | 否 | ⏭️ |
 | 10 | 切換 session | 使用者 | 設定都完成後才啟動：新終端機執行 `claude-tg`，首句「讀 HANDOFF.md 接續」；已有正確的接收 session 則不重開 | 請執行指令 | MCP 失敗快取 → 〈排查〉 |
-| 11 | 必要驗證 | 雙方 | 〈驗證〉必要，每個勾選框一項；能自動驗的不問 | 需使用者發訊息才請 | 收發或安全項不過 → 〈排查〉；沒條件測 → ⚠️ 未驗證，不得標為已驗證 |
-| 12 | 加入群組 | 使用者、AI 引導 | `internal.md` 已定版才做；引導使用者把 bot 加入群組，並提供群組 ID 或自行設定，依〈群組與授權〉「補設群組」完成；一律需 @、不限發話者（群內成員都進得來，怎麼回由回應等級決定）、不啟用話題、bot 不給管理員與 `can_manage_topics` | 群組 ID | 不加 → ⏭️ 未設定，收尾列入「未設定」清單，之後隨時可補 |
+| 11 | 必要驗證 | 雙方；收發與 session 內工具類在接收 session、讀檔或 shell 檢查在建置 session | 先請負責人在 Telegram 對 bot 按 START（沒按過則 bot 不能主動私訊，「需確認」與權限確認送不到）；〈驗證〉必要，每個勾選框一項；能自動驗的不問 | 需使用者發訊息才請 | 收發或安全項不過 → 〈排查〉；沒條件測 → ⚠️ 未驗證，不得標為已驗證 |
+| 12 | 加入群組 | 使用者、AI 引導；查群組 ID 在建置 session，`group add`、登錄與自介在接收 session | `internal.md` 已定版才做；先與使用者確認目標群組；bot 尚未入群者請使用者先加入，加完才查群組 ID（或由使用者提供、自行設定），依〈群組與授權〉「補設群組」完成；一律需 @、不限發話者（群內成員都進得來，怎麼回由回應等級決定）、不啟用話題、bot 不給管理員與 `can_manage_topics` | 要加哪個群組 | 不加 → ⏭️ 未設定，收尾列入「未設定」清單，之後隨時可補 |
 | 13 | 帳號安全評估 | AI | 1–12 都完成或略過後才做；先印一行警告再依〈帳號安全評估〉全部偵測完，一次提交清單（現況與建議） | 否 | 偵測不到 → 標「未確認」；使用者要略過 → ⏭️ |
 | 14.1 | 拒寫設定 | — | 預設不設；依〈拒寫設定〉提醒一次，使用者要求才設 | 否 | ⏭️ |
 | 14.2 | 事後清理 | AI | 曾讓 AI 接觸 token 或密碼者，已提醒清 session、快照並自行重設（提醒送達即完成） | 否 | 沒接觸過 → ⏭️ |
@@ -80,6 +80,10 @@
     ```
 
     「請你」不需要使用者回應時，同一則接著印「完成」並進入下一項；需要時停在「請你」，收到回覆並驗證後才印「完成」。狀態標記：✅ 完成、👉 目前、⬜ 未做、⏭️ 略過、⚠️ 警告
+- **切換後分工**：步驟 10 之後，只有必須在接收 session（帶 `--channels`）做的才交給它，其餘留在建置 session；`HANDOFF.md` 只寫接收 session 的任務與進度，建置 session 的項目不進該檔
+  - **接收 session**：11 中需經 Telegram 收發或 session 內才能做的驗證（入站與回覆、未授權者、IM 改設定被拒、群組觸發、`get_history` 工具可用）、12 的 `group add`、`external.md` 登錄與自介；做完更新 `HANDOFF.md` 並告知使用者
+  - **建置 session**：11 中讀檔或 shell 即可的檢查（腳本、`allowFrom`／`admins`、poller、環境變數）、12 的群組 ID 查詢（Telegram Web）、13、14；13 前置依其列，14.4 刪交接檔由它收尾
+  - 無獨立建置 session（逐步手動、無瀏覽器工具）：由接收 session 接手全部
 - **整體授權**（項目 1.2，整個流程只問一次）：說明 checklist 與固定值、強化版 `install.sh` 摘要（AI 先下載讀完：覆蓋範圍、對外連線與執行的程式）、要補裝的工具（含瀏覽器 MCP）、未授權者的訊息仍會存入本機歷史、授權不能取代而仍會跳出的確認（Claude Code 權限、目錄信任、瀏覽器、sudo），以及敏感資訊風險——token、手機號、裝置與 IP 可能經頁面、截圖或指令紀錄送到模型供應商並留在本機紀錄，取得 token 者可接管 bot
   - 涵蓋：照表完成建置所需的全部 AI 代操作，含在新加群組發自介、接觸敏感資訊、取 token 寫檔、存取設定（視為終端機指示）、帳號安全的唯讀偵測；換頁面、工具或步驟不重問。切換 session 後，使用者要求依 `HANDOFF.md` 接續即沿用；使用者隨時可喊停或改自己做
   - 不涵蓋：註冊、驗證碼與密碼、QR 登入由使用者本人做；負責人身分與登錄內容由使用者確認；拒寫、重設憑證、清理紀錄由使用者決定；建置以外的刪除或對外動作；Telegram 執行期授權
@@ -93,7 +97,7 @@
 
 ```text
 ~/secretary/                 # 預設路徑，可改；🚫 不得是 git repo（含 ID 與個資）
-├── AGENTS.md                # 唯一宣告資料目錄與載入規則，內容見 collaboration.md〈登錄檔〉；執行期授權照 assets/agents-policy.md 的預設值寫入，不詢問
+├── AGENTS.md                # 唯一宣告資料目錄與載入規則，內容見下方「指令檔載入規則」；執行期授權照 assets/agents-policy.md 的預設值寫入，不詢問
 ├── CLAUDE.md                # 只寫一行 @AGENTS.md，載入同一份內容
 ├── .claude/settings.json    # Claude Code：只在此啟用 telegram plugin；執行紀錄 hook 也放這
 ├── HANDOFF.md               # 建置交接檔，建置期間才有，見下方「交接」
@@ -101,9 +105,18 @@
 ```
 
 - **啟動**：Claude Code 由 AI 把 alias 寫入使用者的 shell 設定檔，例 `alias claude-tg='cd ~/secretary && claude --channels plugin:telegram@claude-plugins-official'`（已有同名者先問）；Codex 端把 bridge `config.json` 的工作目錄指向同一目錄
-- **交接**（Claude Code）：建完祕書目錄與 alias 後，AI 在祕書目錄寫 `HANDOFF.md`（整份 checklist 與各項狀態、已定案的選擇、注意事項；🚫 不含 token 與 ID），每完成一項就更新，並在設定都完成後請使用者於新終端機改用 alias 啟動，首句請 AI 讀 `HANDOFF.md` 接續；token 寫好前不啟動，以免留下 MCP 失敗快取。只在終端機回合依它接續，建置完成即刪
+- **交接**（Claude Code）：建完祕書目錄與 alias 後，AI 在祕書目錄寫 `HANDOFF.md`（已定案的選擇、接收 session 要做的項目與狀態（分工見〈流程總覽〉「切換後分工」）、注意事項；🚫 不含 token 與 ID），接收 session 每完成一項就更新，並在設定都完成後請使用者於新終端機改用 alias 啟動，首句請 AI 讀 `HANDOFF.md` 接續；token 寫好前不啟動，以免留下 MCP 失敗快取。只在終端機回合依它接續，建置完成即刪
 - **不搬的資料**：token（bridge 的 `.env`）、訊息歷史（`messages.db`）、執行紀錄（`runs.jsonl`）留在原位，不進祕書目錄
-- **專案工作**：祕書不在本目錄改專案，依 collaboration.md〈承接與對內派工〉轉派該專案的 session
+- **專案工作**：祕書不在本目錄改專案，依 collaboration-flows.md〈承接與對內派工〉轉派該專案的 session
+- **指令檔載入規則**：只靠本 skill 觸發不穩；建置時由 AI 把下段寫進祕書目錄的 `AGENTS.md`（Claude Code 與 Codex 共用的唯一宣告處，`CLAUDE.md` 只寫一行 `@AGENTS.md` 引入）；只放指路，規則仍以本 skill 為準。一併寫入〈執行期授權〉〈同意管道〉〈派工流程〉，模版與預設值在 [assets/agents-policy.md](../assets/agents-policy.md)；改指令檔後重啟祕書 session
+
+  ```markdown
+  ## Telegram AI 團隊
+  - 資料目錄：本目錄下 `data/`（`internal.md`、`external.md`、`backlog/`；含 ID 與個資，不外送、不進 repo）
+  - 收到 Telegram 入站、或要向 Telegram 發訊時 → 先載入 mh-telegram-ai-team skill
+  - 在 Telegram 找其他 AI 祕書（提問、討論、請求）時 → 讀 `data/external.md` 取對方 username 與職責，並載入 mh-telegram-ai-team skill
+  - 收到他方【自我介紹】或職責更新【公告】時 → 依 mh-telegram-ai-team skill〈回應等級〉〈認識與更新〉更新同檔
+  ```
 - **檢查**：`check-setup.sh` 以 `MH_TG_SECRETARY_DIR`（預設 `~/secretary`）為祕書目錄
 
 ## 瀏覽器協作
@@ -192,10 +205,10 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 - **`allowFrom` 只放負責人**：強化版會把工具權限確認私訊給 `allowFrom` 每個人，放了別人等於讓他核准
 - **`autoApproveTools` 只放唯讀工具**：清單內工具不經確認
 - **限速用 `limits`**：在 `access.json` 頂層設 `limits`（`messagesPerMinute`／`messagesPerHour`／`tokensPerDay`，可用 `userLimits.<ID>` 逐欄覆寫），超限訊息在進 session 前丟棄，是防 AI 間迴圈的硬防線；同一套強化版內跨所有 bot 合計、無 per-bot 覆寫；不同負責人的部署各自計算，不共享額度。預設值依 checklist 7.2，要改由負責人在終端機指示、AI 代改 `access.json`（`/telegram:access set` 不支援），存檔即生效；Telegram 內 `/usage` 查用量。`admins` 不受限，只放負責人、🚫 不放其他 bot。未設或填 0 即不限
-- **補設群組**：把 bot 加入群組後，給使用者兩種做法擇一——自己在祕書 session 執行 `/telegram:access group add <群組 ID>`，或把群組 ID 告訴 AI 由 AI 設定；ID 取法見〈帳號與 bot〉。設好後登錄 `external.md`〈群組〉，用途與專案不明寫「未設定」；接著告知使用者「將在該群組發自介，並請收到的人回自介」，再依 collaboration.md〈認識與更新〉發【認識】
+- **補設群組**：把 bot 加入群組後，給使用者兩種做法擇一——自己在祕書 session 執行 `/telegram:access group add <群組 ID>`，或把群組 ID 告訴 AI 由 AI 設定；ID 取法見〈帳號與 bot〉。設好後登錄 `external.md`〈群組〉，用途與專案不明寫「未設定」；接著告知使用者「將在該群組發自介，並請收到的人回自介」，再依 collaboration-flows.md〈認識與更新〉發【認識】
 - **話題（Topics）**：不主動啟用、不詢問，多專案優先分群組；既有話題不自行關閉，回覆帶入站的 `thread_id`。分群組可隔離歷史與合批，但隔離不了同一祕書 session 的上下文（理由見 docs/topics.md）
 - **群組升級為超級群組 ID 會變**：以新 ID 重新 `group add`
-- **AI 間互通**：雙方 bot 同群、至少一方開 Bot-to-Bot、雙方各自 `group add`；首次見面流程見 collaboration.md〈認識與更新〉
+- **AI 間互通**：雙方 bot 同群、至少一方開 Bot-to-Bot、雙方各自 `group add`；首次見面流程見 collaboration-flows.md〈認識與更新〉
 
 ## 執行紀錄
 
@@ -238,7 +251,7 @@ Telegram 端步驟（BotFather 對話、bot 參數、拉 bot 進群、查 ID）�
 - [ ] 群組：@bot、回覆 bot、觸發字各觸發一次；不帶者不觸發；`limits` 已設
 - [ ] 群組內請求需同意的事：「需確認」私訊到負責人、群組只見【待確認】；負責人在私訊同意後，結果回原群組
 - [ ] 執行紀錄：@bot 一次後 `runs.jsonl` 多一列，`chat_id`、`usage` 有值
-- [ ] AI 互通（互相認識不需開放；要進一步討論，先在 `AGENTS.md`「回應等級」把該群組或對方 bot 列為討論）：依 collaboration.md〈認識與更新〉由一方 `@all` 邀請自我介紹，對方以 `@邀請者` 回覆且雙方都入站；邀請會喚起所有 bot，第三個 bot 只在後續定向自介時不入站（完整驗收見 docs/test-cases.md TC-03）
+- [ ] AI 互通（互相認識不需開放；要進一步討論，先在 `AGENTS.md`「回應等級」把該群組或對方 bot 列為討論）：依 collaboration-flows.md〈認識與更新〉由一方 `@all` 邀請自我介紹，對方以 `@邀請者` 回覆且雙方都入站；邀請會喚起所有 bot，第三個 bot 只在後續定向自介時不入站（完整驗收見 docs/test-cases.md TC-03）
 - [ ] 機密：接觸過 token 或密碼者已建議事後清理
 - [ ] 拒寫：有做〈拒寫設定〉者，上述 IM 改設定在工具層也被擋
 

@@ -204,14 +204,14 @@ if [ -d "$SEC_DIR" ]; then
   if grep -qF '`data/`' "$SEC_DIR/AGENTS.md" 2>/dev/null; then
     say PASS 4.環境設定 "AGENTS.md 已宣告資料目錄"
   else
-    say WARN 4.環境設定 "AGENTS.md 未宣告資料目錄（載入規則見 collaboration.md〈登錄檔〉）"
+    say WARN 4.環境設定 "AGENTS.md 未宣告資料目錄（載入規則見 setup.md〈祕書目錄〉）"
   fi
   reg="$SEC_DIR/data/internal.md"
   if [ -f "$reg" ]; then
     say PASS 8.登錄檔 "internal.md 已建"
     # 內容：自介與同意的必要欄位已填、無模版佔位；只報欄位名與數量，不輸出值
     miss="$(reg_missing "$reg")"
-    if [ -n "$miss" ]; then say WARN 8.登錄檔 "internal.md 未填：${miss}（自介會被擋；依 collaboration.md〈自介來源〉）"; else say PASS 8.登錄檔 "internal.md 必要欄位已填"; fi
+    if [ -n "$miss" ]; then say WARN 8.登錄檔 "internal.md 未填：${miss}（自介會被擋；依 collaboration-flows.md〈認識與更新〉）"; else say PASS 8.登錄檔 "internal.md 必要欄位已填"; fi
     # 引言行（> 開頭）是模版說明，不計
     n="$(cat "$reg" "$SEC_DIR"/data/internal/*.md 2>/dev/null | grep -v '^>' | grep -c '<[^<>]\+>')"
     [ "$n" -gt 0 ] && say WARN 8.登錄檔 "internal 登錄殘留 $n 行模版佔位 <…>"

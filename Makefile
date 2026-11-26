@@ -25,9 +25,6 @@ AGENTS := claude codex agy opencode
 ifdef SKILLS
 export SKILLS
 endif
-ifdef SOURCE
-export SOURCE
-endif
 ifdef FORCE
 export FORCE
 endif
@@ -35,11 +32,22 @@ endif
 # 不帶目標時印說明，而非誤觸安裝——安裝會改動使用者的 agent 設定，不該是預設行為
 .DEFAULT_GOAL := help
 
-.PHONY: help status install remove update validate
+.PHONY: help status install remove update validate source
+
+# `make source <github|local|status>`：第二個目標當參數，宣告為空目標；為此 status 規則在 source 時不定義
+SOURCE_CALL := $(filter source,$(firstword $(MAKECMDGOALS)))
+ifneq ($(SOURCE_CALL),)
+SOURCE_MODE := $(word 2,$(MAKECMDGOALS))
+ifneq ($(SOURCE_MODE),)
+$(eval $(SOURCE_MODE):;@:)
+endif
+endif
 
 # 目標後的 `## 說明` 由 help 自動擷取，新增目標不必回頭改說明（避免兩處不同步）
+ifeq ($(SOURCE_CALL),)
 status:   ## 顯示安裝現況（含另一種機制的殘留）
 	@$(TOOL) status
+endif
 
 install:  ## 安裝到所有 agent
 	@$(TOOL) install
@@ -49,6 +57,9 @@ update:   ## 更新已安裝的內容
 
 remove:   ## 移除（全部移除時連 marketplace 一起註銷）
 	@$(TOOL) remove
+
+source:   ## 切換或查看 marketplace 來源：make source [github|local|status]
+	@$(TOOL) source $(SOURCE_MODE)
 
 validate: ## 離線驗證 manifest 與 skills 結構，不動任何 agent 設定
 	@$(TOOL) validate
@@ -64,7 +75,6 @@ help:     ## 顯示本說明
 	@printf '  install／remove 會跳矩陣，直接在格子上逐 agent 取捨，不需要另外指定\n'
 	@printf '\n變數：\n'
 	@printf '  %-10s %s\n' SKILLS '只處理指定的 skill（只加不減）；不設＝跳矩陣'
-	@printf '  %-10s %s\n' SOURCE '覆寫 marketplace／plugin 來源；開發時裝工作目錄的內容用 SOURCE=$$PWD'
 	@printf '  %-10s %s\n' FORCE  '1 ＝略過「另一種機制留有殘留」的偵測（會造成 skill 重複載入）'
 	@printf '\n範例：\n'
 	@printf '  %-46s %s\n' 'make status'                                   '看各家現況（有殘留才會多列出來）'
@@ -72,5 +82,7 @@ help:     ## 顯示本說明
 	@printf '  %-46s %s\n' 'make remove'                                   '同一個矩陣，起始全空'
 	@printf '  %-46s %s\n' 'make install SKILLS=mh-code-review'            '指定就不跳矩陣，且只加不減'
 	@printf '  %-46s %s\n' 'make update'                                   '全做，不跳矩陣'
-	@printf '  %-46s %s\n' 'make install SOURCE=$$PWD'                      '開發時改裝工作目錄的內容'
+	@printf '  %-46s %s\n' 'make source local'                            'claude／codex 改從工作目錄安裝與更新'
+	@printf '  %-46s %s\n' 'make source github'                           '切回 GitHub（網址見 .env）'
+	@printf '  %-46s %s\n' 'make source'                                  '看目前來源（同 make source status）'
 

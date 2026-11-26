@@ -129,7 +129,7 @@ Codex 的預設掃描只認 `<plugin root>/skills/<name>/SKILL.md` 這個形狀�
 
 省略時 Claude Code 對 Git 來源以 **git commit SHA** 當版本，push 完使用者 `update` 就拿得到。設了則會釘住該字串，每次發布都要記得 bump，忘記就等於停止發佈。
 
-**開發時要注意**（`SOURCE=$PWD`）：Claude Code 直接讀工作目錄，未 commit 的改動在下次 session 或 `/reload-plugins` 生效，不必 update。Codex 讀的是安裝時的快取（VERSION 欄是 `local`），要重跑 `plugin add`（`make update` 會代做）才會覆蓋，同樣不必 commit。
+**開發時要注意**（`make source local`）：Claude Code 對本機目錄同樣以 HEAD 的 commit SHA 當版本，未 commit 的改動拿不到，commit 後 `make update` 再 `/reload-plugins`。Codex 讀的是安裝時的快取（VERSION 欄是 `local`），要重跑 `plugin add`（`make update` 會代做）才會覆蓋，不必 commit。
 
 ### 不設 `strict`
 

@@ -108,7 +108,7 @@ make validate        # 離線驗證 manifest 與 skills 結構
 
 `install` 與 `remove` 會跳出 **agent × skill 的二維矩陣**——畫面就是現況，改成什麼就同步成什麼（勾起來是裝、取消是移除），按鍵依畫面下方提示，確定後會先印出逐 agent 的增減再執行。
 
-> claude／codex／agy **預設從 GitHub 安裝**，此模式下工作目錄裡未 push 的修改不會生效；要測本機改動得加 `SOURCE=$PWD` 改用工作目錄當來源。
+> claude／codex／agy **預設從 GitHub 安裝**，此模式下工作目錄裡未 push 的修改不會生效；要測本機改動先 `make source local` 改用工作目錄當來源（`make source github` 切回）。
 
 > **重複載入的防線**：兩種機制並存時同一個 skill 會載入兩次，因此安裝前會偵測另一種機制的殘留（舊版工具裝的、手動複製的），偵測到即中止並提示如何處理；確定要並存才加 `FORCE=1`。`remove` 一律兩邊都清。另外 opencode 會**順便掃 `~/.claude/skills/`**，那裡若已有這批 skill，它就已經吃得到了，不必再裝一次。
 

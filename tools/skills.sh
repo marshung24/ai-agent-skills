@@ -6,7 +6,7 @@
 #       使用案例：
 #         tools/skills.sh install                     # 四家；互動終端會跳選單挑 skill
 #         tools/skills.sh status                      # 看各家現況
-#         SOURCE=$PWD tools/skills.sh install         # 開發時改裝工作目錄的內容
+#         tools/skills.sh source local                # marketplace 改用工作目錄（github 切回）
 #         tools/skills.sh remove agy                  # 單一 agent
 #
 # repo 佈局：plugins/<name>/skills/<name>/SKILL.md，plugin 名與 skill 名一致。
@@ -34,8 +34,11 @@
 #   - claude 的 `plugin list` 只列**已安裝**者，格式為縮排區塊（`❯ 名稱` 後接 Version/Scope/Status）
 #   - codex  的 `plugin list` 連**未安裝**者一起列（marketplace 已註冊即出現），格式為表格，
 #            狀態欄可能是 `installed, enabled` 或 `not installed`——判斷時不可用子字串比對
-#   - claude 對同名 marketplace 再 `marketplace add` 會原地換來源，已裝的 plugin 保留；codex 會拒絕，
-#            須先 `marketplace remove`，但 remove 不動 config.toml 的 plugin 設定，重新 add 後即恢復
+#   - claude 對同名 marketplace 再 `marketplace add` 會原地換來源、已裝的 plugin 保留，但新來源與
+#            settings.json 的 extraKnownMarketplaces 宣告不符時會拒絕（目錄→Git 必中），須先改寫宣告；
+#            `marketplace remove`（含 --scope）會連帶解除安裝底下所有 plugin，不可拿來換來源
+#   - codex  對同名 marketplace 換來源一律拒絕，須先 `marketplace remove`；remove 不動 config.toml
+#            的 plugin 設定，重新 add 後即恢復
 #   - claude 對「移除不存在的東西」回非零，codex 與 agy 回 0；remove 前一律先判斷是否真的裝了，
 #            三家對齊到冪等，乾淨環境跑 remove 不該回失敗
 #   - codex  除 `.claude-plugin/marketplace.json` 外亦接受 `.agents/plugins/` 下的 `marketplace.json` 與 `api_marketplace.json`；
@@ -56,10 +59,10 @@
 #           新增 agent 只需補齊該組函式、加進 ALL_AGENTS 並在 agent_mode 宣告方式。
 #
 # I/O：
-#   輸入  ─ $1     子命令：install | remove | update | status | validate
+#   輸入  ─ $1     子命令：install | remove | update | status | source | validate
+#           source 另帶來源：github | local | status（省略＝status），其後才是 agent 代號
 #           $2..   agent 代號：claude | codex | agy | opencode（可多個；省略＝全部）
 #           SKILLS 環境變數：只處理指定的 skill；不設時 install/remove 會跳互動選單
-#           SOURCE 環境變數：覆寫 marketplace／plugin 來源；開發時用 SOURCE=$PWD
 #           FORCE  環境變數：非空 ＝ 略過遺留偵測
 #   輸出  ─ 進度與結果走 stdout；警告與錯誤走 stderr
 #   結束碼─ 0 全數成功；1 至少一個 agent 失敗或被擋下；2 參數錯誤；127 缺依賴
@@ -93,21 +96,28 @@ MP_PLUGINS="$(jq -r '.plugins[].name' "$MANIFEST")"
 #          執行期照樣載入——是隱形卻仍在運作的孤兒，必須主動偵測
 LEGACY_PLUGINS="$(jq -r '(.renames // {}) | keys[]' "$MANIFEST" 2>/dev/null)"
 
-# GITHUB_SOURCE — 從 manifest 的 repository 欄位推導出可直接交給 CLI 的 Git URL
-# DECISION: 不寫死網址，比照其餘名稱一律讀自 manifest，避免搬 repo 時兩處不同步
+# GITHUB_SOURCE — GitHub 來源網址，讀自 repo 根目錄 .env 的 MARKETPLACE_GITHUB_URL（缺檔時讀 .env.example）
+# 無效或未設時為空：只有真的要從 GitHub 安裝或切換時才報錯，查詢、移除與本機來源不受影響
 # DECISION: 未採 `owner/repo` 簡寫，因其 clone 協定隨 SSH 設定而變
-GITHUB_SOURCE="$(jq -r '[.plugins[].repository] | map(select(. != null)) | first // empty' "$MANIFEST")"
-case "$GITHUB_SOURCE" in
-  https://*) GITHUB_SOURCE="${GITHUB_SOURCE%.git}.git" ;;
-  *) GITHUB_SOURCE="" ;;   # 非 HTTPS 或未填：退回本機路徑，由 agent_source 處理
-esac
+ENV_FILE="$REPO_ROOT/.env"
+github_url() {
+  local f="$ENV_FILE" u
+  [ -f "$f" ] || f="$ENV_FILE.example"
+  # 只取該行的值，不 source 整份檔案，避免執行到其他內容
+  u="$(sed -n 's/^MARKETPLACE_GITHUB_URL=//p' "$f" 2>/dev/null | tail -n 1 | tr -d "\"' \r")"
+  case "$u" in https://*) printf '%s\n' "${u%.git}.git" ;; esac
+}
+GITHUB_SOURCE="$(github_url)"
+GITHUB_HINT="（未設定：請在 $ENV_FILE 設 MARKETPLACE_GITHUB_URL=https://…）"
+
+# ensure_env — 動手的子命令才補建 .env，讓使用者有地方改網址；查詢類子命令不產生檔案
+ensure_env() {
+  [ -f "$ENV_FILE" ] || [ ! -f "$ENV_FILE.example" ] && return 0
+  cp "$ENV_FILE.example" "$ENV_FILE" && echo "[注意] 已由 .env.example 建立 .env" >&2
+}
 
 # ── 可由環境變數覆寫的執行參數 ──
-# DECISION: SOURCE 的覆寫值另存為 SOURCE_OVERRIDE——主流程會把「本輪 agent 解析出的來源」
-#           寫回 SOURCE 給 marketplace_* 函式讀，若判斷來源也是同一個變數，
-#           第一圈寫入後就會被誤認為「使用者有指定」，其餘 agent 全部沿用第一家的值
-SOURCE_OVERRIDE="${SOURCE:-}"
-SOURCE=""      # 逐 agent 解析後填入，供 marketplace_* 函式讀取
+SOURCE=""      # 逐 agent 解析後填入，供 marketplace_*／plugin_* 函式讀取
 FORCE="${FORCE:-}"
 SKILLS="${SKILLS:-}"   # 空＝repo 內全部；否則只處理指定的那幾個（主流程會驗證名稱）
 
@@ -486,11 +496,19 @@ agent_mode() {
 
 # agent_source <agent> — 該 agent 在 marketplace／plugin 模式下的安裝來源
 # I/O：輸入 agent 代號；輸出來源字串（Git URL 或本機路徑）到 stdout
-# copy 模式的 agent 用不到；SOURCE 未設時一律用 manifest 推導出的 GitHub URL，
-# 開發時要裝工作目錄的內容用 SOURCE=$PWD 覆寫
+# marketplace 模式沿用已登記的來源（由 source 子命令切換），未註冊時用 GitHub；
+# plugin 模式（agy）不記錄來源，一律用 GitHub；copy 模式用不到
 agent_source() {
-  [ -n "$SOURCE_OVERRIDE" ] && { printf '%s\n' "$SOURCE_OVERRIDE"; return; }
-  printf '%s\n' "${GITHUB_SOURCE:-$REPO_ROOT}"
+  local cur=""
+  [ "$(agent_mode "$1")" = marketplace ] && cur="$(marketplace_source "$1")"
+  printf '%s\n' "${cur:-$GITHUB_SOURCE}"
+}
+
+# use_source <agent> — 把該 agent 的來源填入全域 SOURCE；取不到時記失敗、回 1，由呼叫端略過該 agent
+use_source() {
+  SOURCE="$(agent_source "$1")"
+  [ -n "$SOURCE" ] && return 0
+  printf '  ✗ %s：GitHub 來源%s\n' "$1" "$GITHUB_HINT" >&2; FAILED=1; return 1
 }
 
 # ════════════════ 二維勾選矩陣（agent × skill）════════════════
@@ -746,6 +764,32 @@ marketplace_source() {
   return 0
 }
 
+# marketplace_register <agent> — 以全域 SOURCE 註冊本 marketplace；已登記其他來源時改換
+# I/O：輸入 claude 或 codex；進度走 stdout；失敗累計至 FAILED
+# 換來源時 claude 先改寫 settings.json 的宣告，codex 先註銷（兩家的限制見檔頭 Domain knowhow）
+marketplace_register() {
+  local cur
+  cur="$(marketplace_source "$1")"
+  if [ -n "$cur" ] && [ "$cur" != "$SOURCE" ]; then
+    case "$1" in
+      claude) run "claude：改寫 marketplace 宣告（原 $cur）" claude_declare_source ;;
+      codex)  run "codex：改換 marketplace 來源（原 $cur）" codex plugin marketplace remove "$MARKETPLACE" ;;
+    esac
+  fi
+  run "$1：註冊 marketplace $MARKETPLACE" "$1" plugin marketplace add "$SOURCE"
+}
+
+# claude_declare_source — 把 ~/.claude/settings.json 中本 marketplace 的宣告改成全域 SOURCE
+# I/O：無參數；無宣告時不動；寫入失敗回非零。先寫暫存檔再換名，避免寫到一半毀損設定檔
+claude_declare_source() {
+  local f="$HOME/.claude/settings.json" src
+  [ -f "$f" ] && jq -e --arg n "$MARKETPLACE" '.extraKnownMarketplaces[$n]' "$f" >/dev/null || return 0
+  if [ -d "$SOURCE" ]; then src="$(jq -n --arg p "$SOURCE" '{source:"directory",path:$p}')"
+  else                      src="$(jq -n --arg u "$SOURCE" '{source:"git",url:$u}')"; fi
+  jq --arg n "$MARKETPLACE" --argjson s "$src" '.extraKnownMarketplaces[$n].source = $s' "$f" > "$f.tmp.$$" \
+    && mv "$f.tmp.$$" "$f"
+}
+
 # has_copy_of <agent> <skill> — 該 agent 的 skills 目錄是否有指定 skill（含斷鏈）
 # I/O：輸入 agent 代號與 skill 名；無輸出；回 0 表示有
 has_copy_of() {
@@ -859,7 +903,7 @@ marketplace_claude_install() {
   local p
   skip_missing claude claude && return
   leftover_guard claude || return
-  run "claude：註冊 marketplace $MARKETPLACE" claude plugin marketplace add "$SOURCE"
+  marketplace_register claude
   while IFS= read -r p; do
     run "claude：安裝 $p" claude plugin install "$p@$MARKETPLACE"
   done < <(target_skills)
@@ -902,14 +946,7 @@ marketplace_codex_install() {
   skip_missing codex codex && return
   leftover_guard codex || return
   shared_notice codex
-  # codex 不接受同名換來源，先註銷舊來源；plugin 設定保留在 config.toml，重新註冊後即恢復
-  local cur want="$SOURCE"
-  [ -d "$want" ] && want="$(cd "$want" && pwd)"
-  cur="$(marketplace_source codex)"
-  if [ -n "$cur" ] && [ "$cur" != "$want" ]; then
-    run "codex：改換 marketplace 來源（原 $cur）" codex plugin marketplace remove "$MARKETPLACE"
-  fi
-  run "codex：註冊 marketplace $MARKETPLACE" codex plugin marketplace add "$want"
+  marketplace_register codex
   while IFS= read -r p; do
     run "codex：安裝 $p" codex plugin add "$p@$MARKETPLACE"
   done < <(target_skills)
@@ -930,10 +967,8 @@ marketplace_codex_remove() {
 
 # codex_marketplace_is_git — codex 目前註冊的這個 marketplace 是否為 Git 來源
 # I/O：無參數；無輸出；回 0 表示是 Git 來源（可 upgrade）
-# DECISION: 判準取自 codex 自己的註冊狀態（`marketplace list --json` 的 sourceType），
-#           而非本次的 SOURCE——兩者可以不一致：使用者可能用 SOURCE=$PWD 裝好（註冊成 local），
-#           之後直接跑 update（預設來源是 GitHub）。以 SOURCE 判斷會誤跑 upgrade，
-#           得到「is not configured as a Git marketplace」而被記成失敗
+# 判準取自 codex 自己的註冊狀態（`marketplace list --json` 的 sourceType）：本機來源不能 upgrade，
+# 誤跑會得到「is not configured as a Git marketplace」而被記成失敗
 codex_marketplace_is_git() {
   [ "$(codex plugin marketplace list --json 2>/dev/null \
        | jq -r --arg n "$MARKETPLACE" \
@@ -1260,6 +1295,49 @@ copy_detail() {
   printf '%s' "$out"
 }
 
+# ════════════════ source ════════════════
+
+# do_source <github|local|status> — 切換或查看 marketplace 來源
+# I/O：輸入來源模式（讀全域 TARGETS）；結果表到 stdout；未知模式回 rc=2
+# local＝本 repo 所在目錄（以腳本位置換算，worktree 即該 worktree）；只改註冊、不增減 plugin，
+# 已裝者之後由 update 從新來源更新
+do_source() {
+  local a cur kind state
+  case "$1" in
+    github) SOURCE="$GITHUB_SOURCE"
+            [ -n "$SOURCE" ] || { echo "錯誤：GitHub 來源$GITHUB_HINT" >&2; exit 127; } ;;
+    local)  SOURCE="$REPO_ROOT" ;;
+    status) ;;
+    *) echo "錯誤：未知來源「$1」（可用：github/local/status）" >&2; exit 2 ;;
+  esac
+  if [ "$1" != status ]; then
+    for a in $TARGETS; do
+      [ "$(agent_mode "$a")" = marketplace ] || continue
+      skip_missing "$a" "$a" || marketplace_register "$a"
+    done
+  fi
+
+  echo "source"
+  report AGENT 來源 狀態 細節
+  for a in $TARGETS; do
+    have "$a" || continue
+    case "$(agent_mode "$a")" in
+      marketplace)
+        cur="$(marketplace_source "$a")"
+        case "$cur" in
+          "")               kind=-      ;;
+          "$GITHUB_SOURCE") kind=github ;;
+          "$REPO_ROOT")     kind=local  ;;
+          /*)               kind=他處目錄 ;;
+          *)                kind=其他   ;;
+        esac
+        state=已登記; [ -n "$cur" ] || state=未註冊
+        report "$a" "$kind" "$state" "${cur:-install 時用 ${GITHUB_SOURCE:-GitHub$GITHUB_HINT}}" ;;
+      plugin) report "$a" github 固定 "不記錄來源，一律從 ${GITHUB_SOURCE:-GitHub$GITHUB_HINT} 安裝" ;;
+    esac
+  done
+}
+
 # ════════════════ validate ════════════════
 
 # do_validate — 離線檢查 repo 的 plugin 結構，不需註冊、不動任何 agent 設定
@@ -1325,37 +1403,42 @@ do_validate() {
 # ── 解析子命令：validate 與 help 不需要後續的參數處理，就地結束 ──
 CMD="${1:-}"; shift || true
 case "$CMD" in
-  install|remove|update|status) ;;
+  install|update) ensure_env ;;
+  remove|status) ;;
+  source) SRC_MODE="${1:-status}"; shift || true
+          case "$SRC_MODE" in github|local) ensure_env ;; esac ;;
   validate) do_validate; exit "$FAILED" ;;
   ""|help|-h|--help)
     cat <<EOF
 用法：tools/skills.sh <install|remove|update|status|validate> [agent...]
+      tools/skills.sh source [github|local|status] [agent...]
 
   agent   claude | codex | agy | opencode（可多個；省略＝全部）
 
 每個 skill 各自是一個 plugin，可單獨安裝。安裝方式則是 per-agent 固定的：
-  claude    marketplace  ${GITHUB_SOURCE:-$REPO_ROOT}
-  codex     marketplace  ${GITHUB_SOURCE:-$REPO_ROOT}
-  agy       plugin       ${GITHUB_SOURCE:-$REPO_ROOT}
+  claude    marketplace  已登記的來源；未註冊時 $GITHUB_SOURCE
+  codex     marketplace  已登記的來源；未註冊時 $GITHUB_SOURCE
+  agy       plugin       $GITHUB_SOURCE
   opencode  copy         ${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills
 
   SKILLS  只處理指定的 skill（空白分隔）；不設＝互動選單（非互動時＝全部）
           可用：$(repo_skills | tr '\n' ' ')
-  SOURCE  覆寫 marketplace／plugin 來源；開發時裝工作目錄的內容用 SOURCE=\$PWD
   FORCE   1 ＝略過「另一種機制留有殘留」的偵測
 
 install 與 remove 在互動終端會先跳選單讓你挑；非互動（CI、pipe）一律視為全部。
+source 切換 claude／codex 的 marketplace 來源：github＝.env 的 MARKETPLACE_GITHUB_URL，local＝本 repo 目錄。
 
 範例：
   tools/skills.sh install                                    # 四家，跳選單挑 skill
   tools/skills.sh install claude                             # 只處理 claude
   SKILLS="mh-code-review" tools/skills.sh install            # 只裝一個 skill
   SKILLS="mh-code-review mh-humanizer-zh-tw" tools/skills.sh install claude
-  SOURCE=\$PWD tools/skills.sh install                       # 開發時裝工作目錄的內容
+  tools/skills.sh source local                               # 改用工作目錄（github 切回）
+  tools/skills.sh source                                     # 看目前來源
   tools/skills.sh status                                     # 逐 skill 的現況
 EOF
     exit 0 ;;
-  *) echo "錯誤：未知子命令「${CMD}」（可用：install/remove/update/status/validate）" >&2; exit 2 ;;
+  *) echo "錯誤：未知子命令「${CMD}」（可用：install/remove/update/status/source/validate）" >&2; exit 2 ;;
 esac
 
 # ── 決定目標 agent：省略＝全部；指定則先驗證代號，避免拼錯被靜默忽略成「什麼都沒做」 ──
@@ -1374,6 +1457,12 @@ for a in $TARGETS; do
     *) echo "錯誤：未知 agent「${a}」（可用：${ALL_AGENTS}）" >&2; exit 2 ;;
   esac
 done
+
+# ── source 只動 marketplace 註冊，不進安裝流程 ──
+if [ "$CMD" = source ]; then
+  do_source "$SRC_MODE"
+  exit "$FAILED"
+fi
 
 # ── status 走獨立分支：它只報告現況，不需要來源解析 ──
 if [ "$CMD" = status ]; then
@@ -1469,7 +1558,7 @@ if [ -n "$USE_MATRIX" ]; then
     fi
     if [ -n "${ADD_MAP[$a]}" ]; then
       SKILLS="${ADD_MAP[$a]}"
-      if [ "$mode" != copy ]; then SOURCE="$(agent_source "$a")"; "${mode}_${a}_install"; INSTALLED_ANY=1
+      if [ "$mode" != copy ]; then use_source "$a" && { "${mode}_${a}_install"; INSTALLED_ANY=1; }
       else skip_missing "$a" "$a" || { copy_install "$a"; INSTALLED_ANY=1; }; fi
     fi
   done
@@ -1508,7 +1597,8 @@ for a in $TARGETS; do
 
   mode="$(agent_mode "$a")"
   if [ "$mode" != copy ]; then
-    SOURCE="$(agent_source "$a")"
+    if [ "$CMD" = remove ]; then SOURCE="$(agent_source "$a")"
+    else use_source "$a" || continue; fi
     "${mode}_${a}_${CMD}"
     have "$a" && INSTALLED_ANY=1
   else

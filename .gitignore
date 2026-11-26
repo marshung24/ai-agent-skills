@@ -10,3 +10,6 @@ todo.md
 
 # Playwright 頁面快照（含個資）
 nav.yml
+
+# 本機設定（範本見 .env.example）
+.env

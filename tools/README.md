@@ -39,7 +39,7 @@ claude／codex 的 `install`／`update` 沿用**目前登記的來源**，未註
 
 - 只改 marketplace 註冊，不增減 plugin；已裝的 plugin 之後由 `make update` 從新來源更新。
 - claude 以 HEAD 的 commit 為版本，工作目錄未 commit 的改動 `update` 拿不到；codex 本機來源不需 commit。
-- 兩家都不能直接換同名 marketplace 的來源：claude 先改寫 `~/.claude/settings.json` 的 `extraKnownMarketplaces` 宣告，codex 先註銷再註冊（plugin 設定留在 `config.toml`，重新註冊後恢復）。`marketplace remove` 會連帶解除安裝 claude 的全部 plugin，不用它換來源。
+- 兩家都不能直接換同名 marketplace 的來源：claude 先改寫 `~/.claude/settings.json` 的 `extraKnownMarketplaces` 宣告，codex 先註銷再註冊（plugin 設定留在 `config.toml`，重新註冊後恢復）。新來源註冊失敗時自動還原原來源。`marketplace remove` 會連帶解除安裝 claude 的全部 plugin，不用它換來源。
 
 ### manifest 的幾個選擇
 
@@ -235,6 +235,8 @@ plugin 與 copy 方式逐 skill 標示，比對對象是工作目錄：
 | `install codex`（`~/.agents/skills` 有同名 skill） | 全部照裝、印 `[注意]`，rc=0；`remove` 不刪該處、印 `[注意]` |
 | 點名的 agent 沒裝 CLI | 略過、rc=0，不跑安裝後自檢 |
 | `make source`（GitHub ↔ 本機連續往返） | claude、codex 每次皆切換成功，已裝 plugin 全數保留；之後 `install`／`update` 沿用新來源；`make source`、`make source status` 只顯示；未知模式 rc=2 |
+| 切換時新來源註冊失敗（不存在的 repo） | claude、codex 皆還原原來源與宣告，已裝 plugin 保留，rc=1；之後 `update` 照常 |
+| GitHub 網址未設 | 查詢類子命令不建 `.env`、照常顯示；`source github` rc=127；需要 GitHub 的 agent 記失敗、其餘繼續（含互動矩陣路徑，以 PTY 實測）；本機來源的 `install`／`update` 不受影響 |
 | `update` | rc=0；codex 未註冊時正確略過，本機來源會覆蓋快取；agy／opencode 只更新已安裝的 |
 | 未知 agent／子命令／skill 名 | rc=2 |
 | 二維矩陣（以 PTY 實測） | 起始狀態正確反映現況；`a`／`r`／`c` 在「有未勾」時皆為先全勾；同一 agent 增減並存正確；還原／取消／確定三鈕皆正確（取消後狀態未變） |

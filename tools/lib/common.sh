@@ -21,20 +21,21 @@ skip_missing() {
 
 # run <說明> <指令...> — 執行外部指令並回報結果，失敗時累計 FAILED
 # I/O：輸入顯示用說明字串與待執行指令；成功印一行 ✔ 到 stdout，
-#      失敗印 ✗ 與該指令的完整輸出（縮排）到 stderr
+#      失敗印 ✗ 與該指令的完整輸出（縮排）到 stderr，並回 1
 # DECISION: 輸出先收暫存檔而非直接流出——成功時各家 CLI 的進度訊息沒有閱讀價值，
 #           會把三家×多步驟的報告淹掉；失敗時才需要全文診斷
 run() {
   local label="$1"; shift
-  local out; out="$(mktemp)" || { echo "錯誤：mktemp 失敗" >&2; FAILED=1; return; }
+  local out rc=0; out="$(mktemp)" || { echo "錯誤：mktemp 失敗" >&2; FAILED=1; return 1; }
   if "$@" >"$out" 2>&1; then
     printf '  ✔ %s\n' "$label"
   else
     printf '  ✗ %s（失敗）\n' "$label" >&2
     sed 's/^/      /' "$out" >&2
-    FAILED=1
+    FAILED=1; rc=1
   fi
   rm -f "$out"
+  return "$rc"
 }
 
 # pad <字串> <目標顯示寬度> — 依終端顯示寬度補足空白，不換行

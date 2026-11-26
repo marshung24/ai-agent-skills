@@ -17,7 +17,7 @@ marketplace_claude_install() {
   local p
   skip_missing claude claude && return
   leftover_guard claude || return
-  marketplace_register claude
+  marketplace_register claude || return
   while IFS= read -r p; do
     run "claude：安裝 $p" claude plugin install "$p@$MARKETPLACE"
   done < <(target_skills)
@@ -60,7 +60,7 @@ marketplace_codex_install() {
   skip_missing codex codex && return
   leftover_guard codex || return
   shared_notice codex
-  marketplace_register codex
+  marketplace_register codex || return
   while IFS= read -r p; do
     run "codex：安裝 $p" codex plugin add "$p@$MARKETPLACE"
   done < <(target_skills)
@@ -182,17 +182,25 @@ marketplace_source() {
 
 # marketplace_register <agent> — 以全域 SOURCE 註冊本 marketplace；已登記其他來源時改換
 # I/O：輸入 claude 或 codex；進度走 stdout；失敗累計至 FAILED
-# 換來源時 claude 先改寫 settings.json 的宣告，codex 先註銷（兩家的限制見檔頭 Domain knowhow）
+# 換來源時 claude 先改寫 settings.json 的宣告，codex 先註銷（兩家的限制見檔頭 Domain knowhow）；
+# 前置步驟失敗即停，新來源註冊失敗則還原原來源，回 1 讓呼叫端不再往下裝
 marketplace_register() {
-  local cur
+  local cur new="$SOURCE"
   cur="$(marketplace_source "$1")"
-  if [ -n "$cur" ] && [ "$cur" != "$SOURCE" ]; then
-    case "$1" in
-      claude) run "claude：改寫 marketplace 宣告（原 $cur）" claude_declare_source ;;
-      codex)  run "codex：改換 marketplace 來源（原 $cur）" codex plugin marketplace remove "$MARKETPLACE" ;;
-    esac
+  if [ -z "$cur" ] || [ "$cur" = "$new" ]; then
+    run "$1：註冊 marketplace $MARKETPLACE" "$1" plugin marketplace add "$new"
+    return
   fi
-  run "$1：註冊 marketplace $MARKETPLACE" "$1" plugin marketplace add "$SOURCE"
+  case "$1" in
+    claude) run "claude：改寫 marketplace 宣告（原 $cur）" claude_declare_source || return 1 ;;
+    codex)  run "codex：改換 marketplace 來源（原 $cur）" codex plugin marketplace remove "$MARKETPLACE" || return 1 ;;
+  esac
+  run "$1：註冊 marketplace $MARKETPLACE" "$1" plugin marketplace add "$new" && return 0
+  SOURCE="$cur"
+  [ "$1" = claude ] && claude_declare_source
+  run "$1：還原 marketplace 來源 $cur" "$1" plugin marketplace add "$cur"
+  SOURCE="$new"
+  return 1
 }
 
 # claude_declare_source — 把 ~/.claude/settings.json 中本 marketplace 的宣告改成全域 SOURCE

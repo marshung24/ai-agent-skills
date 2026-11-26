@@ -25,9 +25,21 @@
 
 ### marketplace 來源
 
-預設從 manifest 各 entry 中第一個非 null 的 `repository` 推導出 GitHub HTTPS URL，不寫死在腳本裡。**用 HTTPS URL 而非 `owner/repo` 簡寫**：簡寫在 Claude Code 會先試 SSH、不通才改 HTTPS，走哪條隨使用者的 SSH 設定而變；HTTPS URL 兩家都收，行為固定。
+GitHub 網址讀自 repo 根目錄 `.env` 的 `MARKETPLACE_GITHUB_URL`（不進版控；缺檔時自動由 `.env.example` 建立），須為 HTTPS URL。**用 HTTPS URL 而非 `owner/repo` 簡寫**：簡寫在 Claude Code 會先試 SSH、不通才改 HTTPS，走哪條隨使用者的 SSH 設定而變；HTTPS URL 兩家都收，行為固定。
 
-> **開發時裝工作目錄的內容**：`SOURCE=$PWD tools/skills.sh install`。預設來源是 GitHub，改了工作目錄的檔案不會反映到 claude／codex／agy，必須 commit 並 push 才拿得到。
+claude／codex 的 `install`／`update` 沿用**目前登記的來源**，未註冊時用 GitHub；agy 不記錄來源，一律從 GitHub 裝。
+
+**切換來源**用 `make source`：
+
+| 指令 | 作用 |
+|---|---|
+| `make source local` | claude／codex 改從本 repo 目錄安裝與更新（以 `tools/` 所在位置換算，worktree 即該 worktree） |
+| `make source github` | 切回 `.env` 的 GitHub 網址 |
+| `make source`／`make source status` | 只看目前來源 |
+
+- 只改 marketplace 註冊，不增減 plugin；已裝的 plugin 之後由 `make update` 從新來源更新。
+- claude 以 HEAD 的 commit 為版本，工作目錄未 commit 的改動 `update` 拿不到；codex 本機來源不需 commit。
+- 兩家都不能直接換同名 marketplace 的來源：claude 先改寫 `~/.claude/settings.json` 的 `extraKnownMarketplaces` 宣告，codex 先註銷再註冊（plugin 設定留在 `config.toml`，重新註冊後恢復）。新來源註冊失敗時自動還原原來源。`marketplace remove` 會連帶解除安裝 claude 的全部 plugin，不用它換來源。
 
 ### manifest 的幾個選擇
 
@@ -135,7 +147,7 @@ install（差異更新）
   ```
 
 - **`remove` 一律兩邊都清**：claude／codex／agy 連自己 skills 目錄裡的副本一起刪，互動矩陣也會列出；共用目錄除外，見〈共用目錄的同名衝突〉。
-- **`status` 只在真的有東西時才多印一列** `⚠遺留`：正常情況每個 agent 只有一列，出問題時才看得見。
+- **`status` 只在真的有東西時才多印一列** `⚠遺留`：正常情況每個 agent 只有一列，出問題時才看得見。例外是 claude／codex 已註冊 marketplace 時固定多一列 `來源 已登記`，標出目前的來源。
 
 ## 用法
 
@@ -144,7 +156,7 @@ make status          # 各家現況；有殘留才會多列出來
 make install         # 跳出 agent × skill 矩陣，逐格勾選
 make remove          # 同一個矩陣，起始全空
 make install SKILLS="mh-code-review mh-humanizer-zh-tw"   # 略過矩陣，只加不減
-make install SOURCE=$PWD          # 開發時改裝工作目錄的內容
+make source local                 # 開發時改裝工作目錄的內容（make source github 切回）
 make remove
 make update
 make validate        # 離線驗證，不需註冊
@@ -154,6 +166,7 @@ make validate        # 離線驗證，不需註冊
 
 ```bash
 tools/skills.sh <install|remove|update|status|validate> [claude|codex|agy|opencode ...]
+tools/skills.sh source [github|local|status] [claude|codex|agy ...]
 ```
 
 ### 環境變數
@@ -161,10 +174,9 @@ tools/skills.sh <install|remove|update|status|validate> [claude|codex|agy|openco
 | 變數 | 預設 | 說明 |
 |------|------|------|
 | `SKILLS` | 互動選單 | 只處理指定的 skill（空白分隔），略過選單；名稱拼錯回 rc=2。只影響 `install`／`remove`（以及 claude、agy 與 copy 模式的逐項 `update`）——codex 的 Git 來源 `update` 例外，`marketplace upgrade` 會整份刷新，連已安裝的快取一起 |
-| `SOURCE` | manifest 的 `repository` | 覆寫 marketplace／plugin 來源；開發時用 `SOURCE=$PWD` 裝工作目錄的內容。agy 不記錄來源，用 `SOURCE` 裝的要帶同樣的 `SOURCE` 才會從同一處更新 |
 | `FORCE` | 空 | `1` ＝略過遺留偵測 |
 
-沒有 `METHOD`——每個 agent 只有一種方式。`SOURCE` 對 claude／codex／agy 有意義；opencode 走 copy，來源恆為 repo 本身。
+沒有 `METHOD`——每個 agent 只有一種方式；來源由 `make source` 切換，不用環境變數。
 
 ## `status` 的狀態碼
 
@@ -187,7 +199,7 @@ plugin 與 copy 方式逐 skill 標示，比對對象是工作目錄：
 - **copy 模式只動 repo 有的名稱**：第三方 skill 一律不碰。刪除前另有路徑守衛（兩段路徑非空、basename 須等於 skill 名），避免變數為空時 `rm -rf` 退化成刪整個 skills 目錄。
 - **`remove` 在本 repo 的 plugin 全數移除後才註銷 marketplace**：只移除其中幾個時會保留註冊，否則其餘還裝著的 plugin 會一起失效。若仍有已下架的舊 plugin 裝著也會保留——實測 `claude plugin marketplace remove` 會連帶移除該 marketplace 底下已安裝的 plugin。
 - **`remove` 是冪等的**：claude 對「移除不存在的東西」回非零、codex 與 agy 回 0，故一律先判斷是否真的裝了。乾淨環境跑 `remove` 回 0，不該報錯。
-- **`update` 對 codex 分來源處理**：Git 來源跑 `marketplace upgrade`；本機來源不能 upgrade，改為逐一重跑 `plugin add` 覆蓋快取，已停用的略過（`plugin add` 會重新啟用它）。判準取自 codex 自己的 `marketplace list --json`（`sourceType`），不是本次的 `SOURCE`——兩者可能不一致（用 `SOURCE=$PWD` 裝好後直接跑 `update`，預設來源是 GitHub）。以 SOURCE 判斷會誤跑 `upgrade`，換來一個「is not configured as a Git marketplace」的誤報失敗。
+- **`update` 對 codex 分來源處理**：Git 來源跑 `marketplace upgrade`；本機來源不能 upgrade，改為逐一重跑 `plugin add` 覆蓋快取，已停用的略過（`plugin add` 會重新啟用它）。判準取自 codex 自己的 `marketplace list --json`（`sourceType`）；誤跑 `upgrade` 會換來一個「is not configured as a Git marketplace」的誤報失敗。
 - **名稱不寫死**：marketplace 名與 plugin 名一律用 `jq` 從 `marketplace.json` 讀取，改名只需改 manifest。
 
 ## 安裝後自檢
@@ -207,7 +219,7 @@ plugin 與 copy 方式逐 skill 標示，比對對象是工作目錄：
 
 ## 已驗證
 
-以隔離的假 `HOME`（含獨立 `CODEX_HOME`）實測，除另註明外皆以 `SOURCE=$PWD` 為來源：
+以隔離的假 `HOME`（含獨立 `CODEX_HOME`）實測，除另註明外皆以本機目錄為來源：
 
 | 情境 | 結果 |
 |---|---|
@@ -222,6 +234,9 @@ plugin 與 copy 方式逐 skill 標示，比對對象是工作目錄：
 | `install opencode`（共用目錄有同名 skill） | 照裝，以自己的目錄為準，rc=0 |
 | `install codex`（`~/.agents/skills` 有同名 skill） | 全部照裝、印 `[注意]`，rc=0；`remove` 不刪該處、印 `[注意]` |
 | 點名的 agent 沒裝 CLI | 略過、rc=0，不跑安裝後自檢 |
+| `make source`（GitHub ↔ 本機連續往返） | claude、codex 每次皆切換成功，已裝 plugin 全數保留；之後 `install`／`update` 沿用新來源；`make source`、`make source status` 只顯示；未知模式 rc=2 |
+| 切換時新來源註冊失敗（不存在的 repo） | claude、codex 皆還原原來源與宣告，已裝 plugin 保留，rc=1；之後 `update` 照常 |
+| GitHub 網址未設 | 查詢類子命令不建 `.env`、照常顯示；`source github` rc=127；需要 GitHub 的 agent 記失敗、其餘繼續（含互動矩陣路徑，以 PTY 實測）；本機來源的 `install`／`update` 不受影響 |
 | `update` | rc=0；codex 未註冊時正確略過，本機來源會覆蓋快取；agy／opencode 只更新已安裝的 |
 | 未知 agent／子命令／skill 名 | rc=2 |
 | 二維矩陣（以 PTY 實測） | 起始狀態正確反映現況；`a`／`r`／`c` 在「有未勾」時皆為先全勾；同一 agent 增減並存正確；還原／取消／確定三鈕皆正確（取消後狀態未變） |

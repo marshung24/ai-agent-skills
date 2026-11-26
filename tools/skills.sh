@@ -34,6 +34,8 @@
 #   - claude 的 `plugin list` 只列**已安裝**者，格式為縮排區塊（`❯ 名稱` 後接 Version/Scope/Status）
 #   - codex  的 `plugin list` 連**未安裝**者一起列（marketplace 已註冊即出現），格式為表格，
 #            狀態欄可能是 `installed, enabled` 或 `not installed`——判斷時不可用子字串比對
+#   - claude 對同名 marketplace 再 `marketplace add` 會原地換來源，已裝的 plugin 保留；codex 會拒絕，
+#            須先 `marketplace remove`，但 remove 不動 config.toml 的 plugin 設定，重新 add 後即恢復
 #   - claude 對「移除不存在的東西」回非零，codex 與 agy 回 0；remove 前一律先判斷是否真的裝了，
 #            三家對齊到冪等，乾淨環境跑 remove 不該回失敗
 #   - codex  除 `.claude-plugin/marketplace.json` 外亦接受 `.agents/plugins/` 下的 `marketplace.json` 與 `api_marketplace.json`；
@@ -726,20 +728,22 @@ installed_legacy() {
 # has_marketplace <agent> — 該 agent 是否已註冊本 marketplace
 # I/O：輸入 agent 代號；無輸出；回 0 表示已註冊
 # 用途：remove 前先判斷，避免對不存在的東西下移除指令而收到非零結束碼（誤報為失敗）
-has_marketplace() {
+has_marketplace() { [ -n "$(marketplace_source "$1")" ]; }
+
+# marketplace_source <agent> — 該 agent 目前登記的本 marketplace 來源
+# I/O：輸入 agent 代號；輸出 Git URL 或本機路徑到 stdout，未註冊時無輸出
+marketplace_source() {
   case "$1" in
-    # claude：每個 marketplace 一個 `❯ 名稱` 區塊；取第二欄完全相符，避免前綴誤命中
     claude)
-      have claude && claude plugin marketplace list 2>/dev/null \
-        | awk -v m="$MARKETPLACE" '$1=="❯" && $2==m {f=1} END{exit !f}'
+      have claude && claude plugin marketplace list --json 2>/dev/null \
+        | jq -r --arg n "$MARKETPLACE" '.[]? | select(.name==$n) | .url // .path // .repo // empty'
       ;;
-    # codex：表格，第一欄即名稱；一個都沒有時輸出純文字，awk 自然不命中
     codex)
-      have codex && codex plugin marketplace list 2>/dev/null \
-        | awk -v m="$MARKETPLACE" '$1==m {f=1} END{exit !f}'
+      have codex && codex plugin marketplace list --json 2>/dev/null \
+        | jq -r --arg n "$MARKETPLACE" '.marketplaces[]? | select(.name==$n) | .marketplaceSource.source // empty'
       ;;
-    *) return 1 ;;
   esac
+  return 0
 }
 
 # has_copy_of <agent> <skill> — 該 agent 的 skills 目錄是否有指定 skill（含斷鏈）
@@ -898,7 +902,14 @@ marketplace_codex_install() {
   skip_missing codex codex && return
   leftover_guard codex || return
   shared_notice codex
-  run "codex：註冊 marketplace $MARKETPLACE" codex plugin marketplace add "$SOURCE"
+  # codex 不接受同名換來源，先註銷舊來源；plugin 設定保留在 config.toml，重新註冊後即恢復
+  local cur want="$SOURCE"
+  [ -d "$want" ] && want="$(cd "$want" && pwd)"
+  cur="$(marketplace_source codex)"
+  if [ -n "$cur" ] && [ "$cur" != "$want" ]; then
+    run "codex：改換 marketplace 來源（原 $cur）" codex plugin marketplace remove "$MARKETPLACE"
+  fi
+  run "codex：註冊 marketplace $MARKETPLACE" codex plugin marketplace add "$want"
   while IFS= read -r p; do
     run "codex：安裝 $p" codex plugin add "$p@$MARKETPLACE"
   done < <(target_skills)
@@ -1212,6 +1223,12 @@ agent_status() {
   else
     if [ "$mode" != copy ]; then report "$agent" "$mode" 未安裝 "$(agent_source "$agent")"
     else                         report "$agent" "$mode" 未安裝 "$(agent_skills_dir "$agent")"; fi
+  fi
+
+  # 已登記的來源：GitHub 與本機工作目錄可互相切換，只看版本號分不出裝的是哪邊
+  if [ "$mode" = marketplace ]; then
+    detail="$(marketplace_source "$agent")"
+    [ -n "$detail" ] && report "$agent" 來源 已登記 "$detail"
   fi
 
   # 已下架但仍裝著的舊 plugin：一裝就是全部 skill，且 codex 上完全看不見

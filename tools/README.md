@@ -28,6 +28,8 @@
 預設從 manifest 各 entry 中第一個非 null 的 `repository` 推導出 GitHub HTTPS URL，不寫死在腳本裡。**用 HTTPS URL 而非 `owner/repo` 簡寫**：簡寫在 Claude Code 會先試 SSH、不通才改 HTTPS，走哪條隨使用者的 SSH 設定而變；HTTPS URL 兩家都收，行為固定。
 
 > **開發時裝工作目錄的內容**：`SOURCE=$PWD tools/skills.sh install`。預設來源是 GitHub，改了工作目錄的檔案不會反映到 claude／codex／agy，必須 commit 並 push 才拿得到。
+>
+> **切換來源**：claude／codex 的 marketplace 來源以最後一次 `install` 為準——帶 `SOURCE=$PWD` 切到工作目錄，不帶即切回 GitHub；加 `SKILLS=<已裝的 skill>` 可略過矩陣且不移除其他已裝者。切換後其他已裝的 plugin 也改從新來源更新。claude 以 HEAD 的 commit 為版本，工作目錄未 commit 的改動 `update` 拿不到。目前登記的來源見 `status` 的 `來源` 列。
 
 ### manifest 的幾個選擇
 
@@ -135,7 +137,7 @@ install（差異更新）
   ```
 
 - **`remove` 一律兩邊都清**：claude／codex／agy 連自己 skills 目錄裡的副本一起刪，互動矩陣也會列出；共用目錄除外，見〈共用目錄的同名衝突〉。
-- **`status` 只在真的有東西時才多印一列** `⚠遺留`：正常情況每個 agent 只有一列，出問題時才看得見。
+- **`status` 只在真的有東西時才多印一列** `⚠遺留`：正常情況每個 agent 只有一列，出問題時才看得見。例外是 claude／codex 已註冊 marketplace 時固定多一列 `來源 已登記`，標出目前是 GitHub URL 還是本機路徑。
 
 ## 用法
 
@@ -222,6 +224,7 @@ plugin 與 copy 方式逐 skill 標示，比對對象是工作目錄：
 | `install opencode`（共用目錄有同名 skill） | 照裝，以自己的目錄為準，rc=0 |
 | `install codex`（`~/.agents/skills` 有同名 skill） | 全部照裝、印 `[注意]`，rc=0；`remove` 不刪該處、印 `[注意]` |
 | 點名的 agent 沒裝 CLI | 略過、rc=0，不跑安裝後自檢 |
+| 切換來源（GitHub ↔ 本機） | claude、codex 皆切換成功且其他已裝 plugin 保留；`status` 的 `來源` 列隨之改變；同來源重裝不觸發註銷 |
 | `update` | rc=0；codex 未註冊時正確略過，本機來源會覆蓋快取；agy／opencode 只更新已安裝的 |
 | 未知 agent／子命令／skill 名 | rc=2 |
 | 二維矩陣（以 PTY 實測） | 起始狀態正確反映現況；`a`／`r`／`c` 在「有未勾」時皆為先全勾；同一 agent 增減並存正確；還原／取消／確定三鈕皆正確（取消後狀態未變） |

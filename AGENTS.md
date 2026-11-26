@@ -11,7 +11,7 @@
   - 要寫或改某個 `SKILL.md` 本身 → `docs/skills-development-guide.md`
 - **主分支**：`main`
 - **測試指令**：不適用：repo 內無測試框架也無測試檔，`Makefile` 只有 `status`／`install`／`update`／`remove`／`validate`／`help` 六個目標，且無 `.github/workflows`
-- **其他必跑檢查**：`make validate`（離線驗證 manifest 欄位、每個 plugin 有 `skills/<name>/SKILL.md`、`source` 指向存在的目錄、skill↔entry 雙向對應，並跑 `claude plugin validate --strict` 與各 plugin 的 `agy plugin validate`）；改到 `tools/*.sh` 或任何 `scripts/*.sh` 時另跑 `bash -n <檔>`
+- **其他必跑檢查**：`make validate`（離線驗證 manifest 欄位、每個 plugin 有 `skills/<name>/SKILL.md`、`source` 指向存在的目錄、skill↔entry 雙向對應，並跑 `claude plugin validate --strict` 與各 plugin 的 `agy plugin validate`）；改到 `tools/*.sh`、`tools/lib/*.sh` 或任何 `scripts/*.sh` 時另跑 `bash -n <檔>`
 - **產生物**：不適用：`.claude-plugin/marketplace.json` 是手寫 SSOT，repo 內無 codegen、vendor 快照或 lock 檔
 - **需授權的命令**：`make install`／`make update`／`make remove`（會改動本機各 agent 的 skills 目錄與 marketplace 註冊）
 - **PR 規範**：repo 內無 PR 指南——Body 至少含 Summary、變更項目、Test Plan（指令與結果）

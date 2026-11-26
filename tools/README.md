@@ -166,6 +166,7 @@ make validate        # 離線驗證，不需註冊
 
 ```bash
 tools/skills.sh <install|remove|update|status|validate> [claude|codex|agy|opencode ...]
+tools/skills.sh source [github|local|status] [claude|codex|agy ...]
 ```
 
 ### 環境變數
